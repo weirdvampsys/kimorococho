@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kimorococho</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="login-screen" class="screen active-flex">
+  <div class="fundo-container">
+    <img src="https://files.catbox.moe/dqagfa.png" class="fundo-ondas" alt="Ondas">
+  </div>
+  
+  <div class="janela-paint-wrap">
+    <div class="janela-completa">
+        <img class="barra-paint" src="https://files.catbox.moe/q963rh.png" alt="Barra Paint">
+<div class="janela-vermelha-png">
+    <img class="presas" src="https://files.catbox.moe/6gtp13.png" alt="Presas">
+    <img class="logo" src="https://files.catbox.moe/uf5h7e.png" alt="Logo">
+            <div class="formulario">
+                <div class="campo-grupo">
+                    <img src="https://files.catbox.moe/vidzru.png" class="imagem-label" alt="Login">
+                    <input type="text" id="username">
+                </div>
+                <div class="campo-grupo">
+                    <img src="https://files.catbox.moe/1x10i9.png" class="imagem-label" alt="Senha">
+                    <input type="password" id="password">
+                </div>
+                <img src="https://files.catbox.moe/qkbvmz.png" id="loginBtn" alt="Login">
+            </div>
+        </div>
+    </div>
+  </div>
+</div>
+
+<div id="profile-screen" class="screen">
+    <div class="profile-header">
+      <img id="profilePhoto" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="foto-redonda">
+      <h3 id="displayUsername" class="nome-exibicao">Nome</h3>
+      <div class="botoes-topo">
+          <button id="toggleEditBtn">Editar Perfil</button>
+          <button id="mainThemeToggleBtn">🌓 Tema</button>
+      </div>
+    </div>
+
+    <div id="edit-section" class="card-section" style="display:none; padding: 15px;">
+      <div style="display: flex; gap: 5px; align-items: center; margin-bottom: 10px;">
+          <input id="newName" placeholder="Novo nome" style="margin: 0; flex: 1;">
+          <button id="changeNameBtn" style="margin: 0; padding: 10px;">Salvar</button>
+          <input type="file" id="fileInput" accept="image/*" style="display: none;">
+          <button onclick="document.getElementById('fileInput').click()" style="background: var(--primary); margin: 0; padding: 10px;">Foto</button>
+      </div>
+      <button id="toggleLoginChangeBtn" style="background: var(--warning); width: 100%; color: black;">Mudar Login/Senha?</button>
+      <div id="login-change-section" style="display:none; background: rgba(0,0,0,0.2); margin-top: 10px; padding: 10px; border-radius: 8px;">
+          <input type="text" id="newUsernameInput" placeholder="Novo login">
+          <button id="changeUsernameBtn" style="background: var(--warning); width: 100%; color: black; margin-bottom:10px;">Confirmar Login</button>
+          <input type="password" id="newPasswordInput" placeholder="Nova senha">
+          <button id="changePasswordBtn" style="background: var(--warning); width: 100%; color: black;">Confirmar Senha</button>
+      </div>
+    </div>
+
+    <div style="padding: 20px; flex: 1; overflow-y: auto;">
+      <h4>Conversas Privadas (DM)</h4>
+      <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+          <input type="text" id="friendIdInput" placeholder="Login do amigo">
+          <button id="addFriendBtn">Buscar</button>
+      </div>
+      <div id="friendsList"></div>
+      <hr style="border-color: #444; margin: 20px 0;">
+      <h4>Grupos</h4>
+      <input type="text" id="groupNameInput" placeholder="Nome do grupo">
+      <button id="createGroupBtn" style="background: var(--success); width: 100%;">Criar Grupo</button>
+      <div id="groupsList"></div>
+    </div>
+    <button id="logoutBtn" style="background: var(--danger); margin: 10px;">Sair</button>
+</div>
+
+<div id="chat-screen" class="screen" style="position:fixed; top:0; left:0; width:100%; height:100%; z-index:1000; background:var(--bg-dark);">
+    <div class="chat-header">
+      <button id="backToProfile" style="padding:5px 10px;">←</button>
+      <div id="headerClickArea" style="display:flex; flex-direction:column; flex:1; padding-left:10px; cursor: pointer;">
+        <h3 id="chatWithTitle" style="margin:0; font-size: 16px;">Chat</h3>
+        <span id="chatStatus" style="font-size: 12px;"></span>
+      </div>
+      
+      <button id="themeToggleBtn" style="padding:5px; font-size: 14px; background: transparent;">🌓</button>
+      
+      <input type="color" id="chatColorPicker" title="Mudar cor" style="width:25px; height:25px; padding:0; border:none; background:transparent; cursor:pointer;">
+      <button id="wallpaperBtn" style="padding:5px; font-size: 14px; background: transparent;">🖼️</button>
+      <input type="file" id="wallpaperInput" accept="image/*" style="display: none;">
+      
+      <button id="addMemberBtn" style="display:none; font-size: 11px;">+ Membro</button>
+      <button id="deleteGroupBtn" style="display:none; background: var(--danger); font-size: 11px;">Apagar</button>
+    </div>
+    <div id="messages"></div>
+    <div id="typingIndicator" style="display:none; padding:5px 15px; font-size:12px;"></div>
+    <div class="chat-input-area">
+        <div class="input-wrapper">
+            <input type="text" id="messageInput" placeholder="Mensagem">
+            <input type="file" id="mediaInput" accept="image/*,video/*" style="display: none;">
+            <button class="icon-btn" onclick="document.getElementById('mediaInput').click()">📎</button>
+        </div>
+        <button id="actionBtn" class="circle-btn"><span id="actionIcon">🎤</span></button>
+    </div>
+</div>
+
+<div id="group-info-screen" class="screen" style="position:fixed; top:0; left:0; width:100%; height:100%; z-index:1500; background:var(--bg-dark); overflow-y:auto; display:none;">
+    <div class="chat-header">
+      <button id="closeGroupInfoBtn" style="padding:5px 10px;">←</button>
+      <h3 style="margin:0; padding-left:10px;">Dados do Grupo</h3>
+    </div>
+    <div class="perfil-container-grupo">
+      <img id="groupPhotoPreview" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="foto-redonda">
+      <input type="file" id="groupPhotoInput" style="display:none;">
+      <div class="nome-area-grupo">
+          <h2 id="groupInfoName">Nome</h2>
+          <button id="editGroupNameBtn">✏️</button>
+      </div>
+      <div id="groupAddMemberDiv" style="display: none; width:100%; margin-top:10px;">
+         <input type="text" id="newGroupMemberInput" placeholder="Login para adicionar">
+         <button id="addNewGroupMemberBtn">Adicionar</button>
+      </div>
+      <hr style="width:100%; border-color:#444;">
+      <h4 style="align-self:flex-start;">Membros</h4>
+      <div id="groupMembersList" style="width:100%; display:flex; flex-direction:column; gap:10px;"></div>
+    </div>
+</div>
+
+<div id="imageModal" class="modal" onclick="this.style.display='none'">
+  <img id="modalImg" src="">
+</div>
+  
+<div id="cropperModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); justify-content:center; align-items:center; z-index:10000; flex-direction:column;">
+  <div style="background:var(--bg-light); padding:20px; border-radius:12px; width:90%; max-width:500px;">
+    <div style="width:100%; height:300px; background:#000; border-radius:8px; overflow:hidden;">
+      <img id="imageToCrop" style="max-width:100%;">
+    </div>
+    <div style="margin-top:20px; display:flex; gap:10px;">
+      <button id="cancelCrop" style="flex:1; background:var(--danger);">Cancelar</button>
+      <button id="confirmCrop" style="flex:1; background:var(--success);">Salvar Foto</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+<script type="module" src="script.js"></script>
+</body>
+</html>
