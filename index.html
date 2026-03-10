@@ -17,9 +17,9 @@
   <div class="janela-paint-wrap">
     <div class="janela-completa">
         <img class="barra-paint" src="https://files.catbox.moe/q963rh.png" alt="Barra Paint">
-<div class="janela-vermelha-png">
-    <img class="presas" src="https://files.catbox.moe/6gtp13.png" alt="Presas">
-    <img class="logo" src="https://files.catbox.moe/uf5h7e.png" alt="Logo">
+        <div class="janela-vermelha-png">
+            <img class="presas" src="https://files.catbox.moe/6gtp13.png" alt="Presas">
+            <img class="logo" src="https://files.catbox.moe/uf5h7e.png" alt="Logo">
             <div class="formulario">
                 <div class="campo-grupo">
                     <img src="https://files.catbox.moe/vidzru.png" class="imagem-label" alt="Login">
@@ -100,6 +100,12 @@
     <div class="chat-input-area">
         <div class="input-wrapper">
             <input type="text" id="messageInput" placeholder="Mensagem">
+            
+            <button class="icon-btn" id="openFavoritesBtn" title="Figurinhas Favoritas">⭐</button>
+
+            <input type="file" id="stickerInput" accept="image/*" style="display: none;">
+            <button class="icon-btn" onclick="document.getElementById('stickerInput').click()" title="Nova Figurinha">🎴</button>
+
             <input type="file" id="mediaInput" accept="image/*,video/*" style="display: none;">
             <button class="icon-btn" onclick="document.getElementById('mediaInput').click()">📎</button>
         </div>
@@ -123,14 +129,35 @@
          <input type="text" id="newGroupMemberInput" placeholder="Login para adicionar">
          <button id="addNewGroupMemberBtn">Adicionar</button>
       </div>
+      
+      <div id="groupActionsDiv" style="display:flex; gap:10px; margin-top:15px; width:100%;">
+          <button id="leaveGroupBtnInfo" style="flex:1; background: var(--warning); color: black;">Sair do Grupo</button>
+          <button id="deleteGroupBtnInfo" style="flex:1; background: var(--danger); display: none;">Apagar Grupo</button>
+      </div>
+
       <hr style="width:100%; border-color:#444;">
       <h4 style="align-self:flex-start;">Membros</h4>
       <div id="groupMembersList" style="width:100%; display:flex; flex-direction:column; gap:10px;"></div>
     </div>
 </div>
 
-<div id="imageModal" class="modal" onclick="this.style.display='none'">
-  <img id="modalImg" src="">
+<div id="imageModal" class="modal" onclick="if(event.target === this) this.style.display='none'" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.95); justify-content:center; align-items:center; z-index:10001; cursor:zoom-out;">
+  <div style="display:flex; flex-direction:column; align-items:center; pointer-events:none;">
+    <img id="modalImg" src="" style="pointer-events:auto; max-width:95vw; max-height:90vh; object-fit:contain;">
+    <a id="downloadImageBtn" href="" download="imagem.jpg" style="margin-top:20px; background:var(--primary); color:white; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; pointer-events:auto;">📥 Baixar Foto</a>
+    <a id="favoriteImageBtn" href="#" style="margin-top:10px; background:var(--warning); color:black; padding:10px 20px; border-radius:8px; text-decoration:none; font-weight:bold; pointer-events:auto;">⭐ Favoritar</a>
+  </div>
+</div>
+
+<div id="favoritesModal" class="modal" onclick="if(event.target === this) this.style.display='none'" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:10001; justify-content:center; align-items:center;">
+    <div style="background:var(--bg-light); width:90%; max-width:400px; padding:20px; border-radius:12px; max-height:80vh; display:flex; flex-direction:column; pointer-events:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="margin:0;">Figurinhas Salvas</h3>
+            <button onclick="document.getElementById('favoritesModal').style.display='none'" style="background:var(--danger); padding:5px 10px; margin:0;">X</button>
+        </div>
+        <div id="favoritesGrid" style="display:flex; flex-wrap:wrap; gap:10px; overflow-y:auto; flex:1; justify-content:center;">
+        </div>
+    </div>
 </div>
   
 <div id="cropperModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); justify-content:center; align-items:center; z-index:10000; flex-direction:column;">

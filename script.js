@@ -39,6 +39,10 @@ let typingTimeout;
 let mediaRecorder;
 let audioChunks = [];
 
+// --- ELEMENTOS DOM FREQUENTES ---
+const campoTexto = document.getElementById("messageInput");
+const iconeBotao = document.getElementById("actionIcon");
+
 // Função para gerenciar se você está online ou não
 function gerenciarPresenca() {
     if (!currentUser) return;
@@ -54,22 +58,25 @@ function gerenciarPresenca() {
 }
 
 // --- AUTENTICAÇÃO E SESSÃO ---
-document.getElementById("loginBtn").onclick = async () => {
-    const u = document.getElementById("username").value.trim().toLowerCase();
-    const p = document.getElementById("password").value.trim();
+const loginBtn = document.getElementById("loginBtn");
+if(loginBtn) {
+    loginBtn.onclick = async () => {
+        const u = document.getElementById("username").value.trim().toLowerCase();
+        const p = document.getElementById("password").value.trim();
 
-    try {
-        await signInWithEmailAndPassword(auth, u + "@chat.com", p);
-        currentUser = u; 
-        showScreen("profile-screen");
-        loadProfile();
-        gerenciarPresenca();
-        iniciarNotificacoesGlobais();
-    } catch (e) {
-        console.error(e);
-        alert("Erro ao entrar: Verifique se o e-mail/senha existem no painel do Firebase.");
-    }
-};
+        try {
+            await signInWithEmailAndPassword(auth, u + "@chat.com", p);
+            currentUser = u; 
+            showScreen("profile-screen");
+            loadProfile();
+            gerenciarPresenca();
+            iniciarNotificacoesGlobais();
+        } catch (e) {
+            console.error(e);
+            alert("Erro ao entrar: Verifique se o e-mail/senha existem no painel do Firebase.");
+        }
+    };
+}
 
 const logoutBtn = document.getElementById("logoutBtn");
 if (logoutBtn) {
@@ -83,10 +90,6 @@ if (logoutBtn) {
     };
 }
 
-// --- ELEMENTOS DOM FREQUENTES ---
-const campoTexto = document.getElementById("messageInput");
-const iconeBotao = document.getElementById("actionIcon");
-
 // --- NAVEGAÇÃO ---
 function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => {
@@ -98,7 +101,7 @@ function showScreen(id) {
 }
 
 const logarComEnter = (event) => {
-    if (event.key === "Enter") document.getElementById("loginBtn").click();
+    if (event.key === "Enter") document.getElementById("loginBtn")?.click();
 };
 
 const userField = document.getElementById("username");
@@ -146,105 +149,122 @@ if (btnChangePass) {
     };
 }
 
-document.getElementById("changeUsernameBtn").onclick = async () => {
-    const novoLogin = document.getElementById("newUsernameInput").value.trim().toLowerCase();
-    const antigoLogin = currentUser;
+const changeUsernameBtn = document.getElementById("changeUsernameBtn");
+if(changeUsernameBtn){
+    changeUsernameBtn.onclick = async () => {
+        const novoLogin = document.getElementById("newUsernameInput").value.trim().toLowerCase();
+        const antigoLogin = currentUser;
 
-    if (!novoLogin || novoLogin === antigoLogin) return alert("Digite um login diferente!");
+        if (!novoLogin || novoLogin === antigoLogin) return alert("Digite um login diferente!");
 
-    try {
-        const checkSnap = await get(ref(db, `users/${novoLogin}`));
-        if (checkSnap.exists()) return alert("Este login já está em uso!");
+        try {
+            const checkSnap = await get(ref(db, `users/${novoLogin}`));
+            if (checkSnap.exists()) return alert("Este login já está em uso!");
 
-        if (!confirm(`Atenção: Vamos mover todas as suas conversas para '${novoLogin}'. Você será deslogado.`)) return;
+            if (!confirm(`Atenção: Vamos mover todas as suas conversas para '${novoLogin}'. Você será deslogado.`)) return;
 
-        const userSnap = await get(ref(db, `users/${antigoLogin}`));
-        const dadosAtuais = userSnap.val();
+            const userSnap = await get(ref(db, `users/${antigoLogin}`));
+            const dadosAtuais = userSnap.val();
 
-        const groupsSnap = await get(ref(db, "groups"));
-        if (groupsSnap.exists()) {
-            const updates = {};
-            groupsSnap.forEach(groupChild => {
-                const groupId = groupChild.key;
-                const groupData = groupChild.val();
+            const groupsSnap = await get(ref(db, "groups"));
+            if (groupsSnap.exists()) {
+                const updates = {};
+                groupsSnap.forEach(groupChild => {
+                    const groupId = groupChild.key;
+                    const groupData = groupChild.val();
 
-                if (groupData.members && groupData.members[antigoLogin]) {
-                    updates[`groups/${groupId}/members/${novoLogin}`] = true;
-                    updates[`groups/${groupId}/members/${antigoLogin}`] = null;
-                }
-                if (groupData.admin === antigoLogin) updates[`groups/${groupId}/admin`] = novoLogin;
-                if (groupData.admins && groupData.admins[antigoLogin]) {
-                    updates[`groups/${groupId}/admins/${novoLogin}`] = true;
-                    updates[`groups/${groupId}/admins/${antigoLogin}`] = null;
-                }
-            });
-            await update(ref(db), updates);
-        }
+                    if (groupData.members && groupData.members[antigoLogin]) {
+                        updates[`groups/${groupId}/members/${novoLogin}`] = true;
+                        updates[`groups/${groupId}/members/${antigoLogin}`] = null;
+                    }
+                    if (groupData.admin === antigoLogin) updates[`groups/${groupId}/admin`] = novoLogin;
+                    if (groupData.admins && groupData.admins[antigoLogin]) {
+                        updates[`groups/${groupId}/admins/${novoLogin}`] = true;
+                        updates[`groups/${groupId}/admins/${antigoLogin}`] = null;
+                    }
+                });
+                await update(ref(db), updates);
+            }
 
-        const chatsSnap = await get(ref(db, "chats"));
-        if (chatsSnap.exists()) {
-            const chats = chatsSnap.val();
-            for (let chatId in chats) {
-                if (chatId.includes(antigoLogin) && chatId.includes("_")) {
-                    const amigo = chatId.replace(antigoLogin, "").replace("_", "");
-                    const novoChatId = [novoLogin, amigo].sort().join("_");
-                    
-                    await set(ref(db, `chats/${novoChatId}`), chats[chatId]);
-                    await remove(ref(db, `chats/${chatId}`));
-                    
-                    const mensagensSnap = await get(ref(db, `chats/${novoChatId}`));
-                    const msgUpdates = {};
-                    mensagensSnap.forEach(m => {
-                        if (m.val().sender === antigoLogin) {
-                            msgUpdates[`chats/${novoChatId}/${m.key}/sender`] = novoLogin;
-                        }
-                    });
-                    await update(ref(db), msgUpdates);
+            const chatsSnap = await get(ref(db, "chats"));
+            if (chatsSnap.exists()) {
+                const chats = chatsSnap.val();
+                for (let chatId in chats) {
+                    if (chatId.includes(antigoLogin) && chatId.includes("_")) {
+                        const amigo = chatId.replace(antigoLogin, "").replace("_", "");
+                        const novoChatId = [novoLogin, amigo].sort().join("_");
+                        
+                        await set(ref(db, `chats/${novoChatId}`), chats[chatId]);
+                        await remove(ref(db, `chats/${chatId}`));
+                        
+                        const mensagensSnap = await get(ref(db, `chats/${novoChatId}`));
+                        const msgUpdates = {};
+                        mensagensSnap.forEach(m => {
+                            if (m.val().sender === antigoLogin) {
+                                msgUpdates[`chats/${novoChatId}/${m.key}/sender`] = novoLogin;
+                            }
+                        });
+                        await update(ref(db), msgUpdates);
+                    }
                 }
             }
+
+            await set(ref(db, `users/${novoLogin}`), dadosAtuais);
+            await remove(ref(db, `users/${antigoLogin}`));
+
+            alert("Migração concluída! Entre com seu novo login.");
+            location.reload();
+        } catch (e) { alert("Erro na migração: " + e.message); }
+    };
+}
+
+const changeNameBtn = document.getElementById("changeNameBtn");
+if(changeNameBtn){
+    changeNameBtn.onclick = async () => {
+        const novoNome = document.getElementById("newName").value.trim();
+        if (!novoNome) return alert("Digite um nome válido!");
+        try {
+            await update(ref(db, `users/${currentUser}`), { displayName: novoNome });
+            alert("Nome atualizado!");
+            document.getElementById("newName").value = "";
+        } catch (error) { alert("Erro ao atualizar nome."); }
+    };
+}
+
+const toggleEditBtn = document.getElementById("toggleEditBtn");
+if(toggleEditBtn){
+    toggleEditBtn.onclick = () => {
+        const section = document.getElementById("edit-section");
+        const btn = document.getElementById("toggleEditBtn");
+        if (section.style.display === "none" || section.style.display === "") {
+            section.style.display = "block";
+            btn.innerText = "Fechar Edição";
+            btn.style.background = "var(--danger)";
+        } else {
+            section.style.display = "none";
+            btn.innerText = "Editar Perfil";
+            btn.style.background = "#444";
         }
+    };
+}
 
-        await set(ref(db, `users/${novoLogin}`), dadosAtuais);
-        await remove(ref(db, `users/${antigoLogin}`));
-
-        alert("Migração concluída! Entre com seu novo login.");
-        location.reload();
-    } catch (e) { alert("Erro na migração: " + e.message); }
-};
-
-document.getElementById("changeNameBtn").onclick = async () => {
-    const novoNome = document.getElementById("newName").value.trim();
-    if (!novoNome) return alert("Digite um nome válido!");
-    try {
-        await update(ref(db, `users/${currentUser}`), { displayName: novoNome });
-        alert("Nome atualizado!");
-        document.getElementById("newName").value = "";
-    } catch (error) { alert("Erro ao atualizar nome."); }
-};
-
-document.getElementById("toggleEditBtn").onclick = () => {
-    const section = document.getElementById("edit-section");
-    const btn = document.getElementById("toggleEditBtn");
-    if (section.style.display === "none" || section.style.display === "") {
-        section.style.display = "block";
-        btn.innerText = "Fechar Edição";
-        btn.style.background = "var(--danger)";
-    } else {
-        section.style.display = "none";
-        btn.innerText = "Editar Perfil";
-        btn.style.background = "#444";
-    }
-};
-
-document.getElementById("toggleLoginChangeBtn").onclick = () => {
-    const loginSection = document.getElementById("login-change-section");
-    loginSection.style.display = loginSection.style.display === "none" ? "block" : "none";
-};
+const toggleLoginChangeBtn = document.getElementById("toggleLoginChangeBtn");
+if(toggleLoginChangeBtn){
+    toggleLoginChangeBtn.onclick = () => {
+        const loginSection = document.getElementById("login-change-section");
+        loginSection.style.display = loginSection.style.display === "none" ? "block" : "none";
+    };
+}
 
 // --- CROPPER (IMAGENS E FOTOS) ---
-document.getElementById("fileInput").onchange = (e) => abrirCropper(e, 'profile', 1);
-document.getElementById("wallpaperInput").onchange = (e) => abrirCropper(e, 'wallpaper', null); // FIX: Passar null para proporção livre no wallpaper
-if(document.getElementById("groupPhotoInput")) document.getElementById("groupPhotoInput").onchange = (e) => abrirCropper(e, 'group', 1);
+const fileInput = document.getElementById("fileInput");
+if(fileInput) fileInput.onchange = (e) => abrirCropper(e, 'profile', 1);
+
+const wallpaperInput = document.getElementById("wallpaperInput");
+if(wallpaperInput) wallpaperInput.onchange = (e) => abrirCropper(e, 'wallpaper', null); 
+
+const groupPhotoInput = document.getElementById("groupPhotoInput");
+if(groupPhotoInput) groupPhotoInput.onchange = (e) => abrirCropper(e, 'group', 1);
 
 function abrirCropper(e, type, ratio) {
     const file = e.target.files[0];
@@ -257,7 +277,6 @@ function abrirCropper(e, type, ratio) {
         const img = document.getElementById("imageToCrop");
         modal.style.display = "flex";
         
-        // FIX: Só inicie o Cropper DEPOIS que a imagem carregar na tela
         img.onload = () => {
             if (cropperInstance) cropperInstance.destroy();
             cropperInstance = new Cropper(img, {
@@ -271,47 +290,45 @@ function abrirCropper(e, type, ratio) {
         img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
-    e.target.value = ''; // FIX: Permite enviar a mesma foto de novo
+    e.target.value = ''; 
 }
 
 const btnConfirmCrop = document.getElementById("confirmCrop");
 if (btnConfirmCrop) {
     btnConfirmCrop.onclick = async (e) => {
-    e.preventDefault(); 
-    if (!cropperInstance) return;
-    
-    let cropOptions = (currentCropType === 'profile' || currentCropType === 'group') 
-        ? { width: 400, height: 400 } : { width: 800 }; // Reduzimos um pouco para não pesar o banco
+        e.preventDefault(); 
+        if (!cropperInstance) return;
+        
+        let cropOptions = (currentCropType === 'profile' || currentCropType === 'group') 
+            ? { width: 400, height: 400 } : { width: 800 }; 
 
-    const canvas = cropperInstance.getCroppedCanvas(cropOptions);
-    if (!canvas) return alert("Erro ao processar imagem.");
+        const canvas = cropperInstance.getCroppedCanvas(cropOptions);
+        if (!canvas) return alert("Erro ao processar imagem.");
 
-    // Geramos o texto da imagem (Base64) bem compactado (0.6 de qualidade)
-    const base64 = canvas.toDataURL("image/jpeg", 0.6);
+        const base64 = canvas.toDataURL("image/jpeg", 0.6);
 
-    try {
-        btnConfirmCrop.innerText = "Salvando...";
-        btnConfirmCrop.disabled = true;
+        try {
+            btnConfirmCrop.innerText = "Salvando...";
+            btnConfirmCrop.disabled = true;
 
-        if (currentCropType === 'profile') {
-            await update(ref(db, `users/${currentUser}`), { photoUrl: base64 });
-            document.getElementById("profilePhoto").src = base64;
-        } else if (currentCropType === 'group') {
-            await update(ref(db, `groups/${activeChatId}`), { photoUrl: base64 });
-        } else {
-            // Salva o wallpaper no banco para ele não sumir se você trocar de celular
-            await set(ref(db, `users/${currentUser}/wallpapers/${activeChatId}`), base64);
-            document.getElementById("messages").style.backgroundImage = `url(${base64})`;
-        }
+            if (currentCropType === 'profile') {
+                await update(ref(db, `users/${currentUser}`), { photoUrl: base64 });
+                document.getElementById("profilePhoto").src = base64;
+            } else if (currentCropType === 'group') {
+                await update(ref(db, `groups/${activeChatId}`), { photoUrl: base64 });
+            } else {
+                await set(ref(db, `users/${currentUser}/wallpapers/${activeChatId}`), base64);
+                document.getElementById("messages").style.backgroundImage = `url(${base64})`;
+            }
 
-        document.getElementById("cropperModal").style.display = "none";
-        cropperInstance.destroy();
-        cropperInstance = null;
-    } catch (error) {
-        alert("Falha ao salvar: " + error.message);
-    } finally {
-        btnConfirmCrop.innerText = "Salvar Foto";
-        btnConfirmCrop.disabled = false;
+            document.getElementById("cropperModal").style.display = "none";
+            cropperInstance.destroy();
+            cropperInstance = null;
+        } catch (error) {
+            alert("Falha ao salvar: " + error.message);
+        } finally {
+            btnConfirmCrop.innerText = "Salvar Foto";
+            btnConfirmCrop.disabled = false;
         }
     };
 }
@@ -335,10 +352,11 @@ function abrirChat(titulo) {
     if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
 
     const statusLabel = document.getElementById("chatStatus");
-    if(!statusLabel) return;
+    const chatTitleElem = document.getElementById("chatWithTitle");
     
-    document.getElementById("chatWithTitle").innerText = titulo;
-    statusLabel.innerText = ""; 
+    if(chatTitleElem) chatTitleElem.innerText = titulo;
+    if(statusLabel) statusLabel.innerText = ""; 
+    
     showScreen("chat-screen");
 
     if (isGroup === false) {
@@ -347,6 +365,7 @@ function abrirChat(titulo) {
         
         if (amigo) {
             statusUnsubscribe = onValue(ref(db, `users/${amigo}/status`), (snap) => {
+                if(!statusLabel) return;
                 const status = snap.val();
                 if (status === "online") {
                     statusLabel.innerText = "● Online";
@@ -358,27 +377,29 @@ function abrirChat(titulo) {
             });
         }
     } else {
-        statusLabel.innerText = "Conversa em Grupo";
-        statusLabel.style.color = "#aaa";
+        if(statusLabel) {
+            statusLabel.innerText = "Conversa em Grupo";
+            statusLabel.style.color = "#aaa";
+        }
     }
 
-    // Busca o wallpaper salvo no banco de dados
-get(ref(db, `users/${currentUser}/wallpapers/${activeChatId}`)).then(snap => {
-    if(snap.exists()){
-        document.getElementById("messages").style.backgroundImage = `url(${snap.val()})`;
-    } else {
-        document.getElementById("messages").style.backgroundImage = "none";
-    }
-});
+    get(ref(db, `users/${currentUser}/wallpapers/${activeChatId}`)).then(snap => {
+        const msgContainer = document.getElementById("messages");
+        if(!msgContainer) return;
+        if(snap.exists()){
+            msgContainer.style.backgroundImage = `url(${snap.val()})`;
+        } else {
+            msgContainer.style.backgroundImage = "none";
+        }
+    });
 
     loadMessages();
 }
 
 function loadMessages() {
     get(ref(db, "users")).then(userSnap => {
-        if (!activeChatId) return; // FIX: Previne erro se o usuário sair rápido demais
+        if (!activeChatId) return;
         
-        // FIX: Limpar listeners antigos ANTES de criar novos para evitar duplicações
         if (chatUnsubscribe) { chatUnsubscribe(); chatUnsubscribe = null; }
         if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
 
@@ -411,8 +432,8 @@ function loadMessages() {
                 let readReceipt = "";
                 if (isMine) { 
                     readReceipt = m.read 
-                        ? `<span style="color:#4dabf7; font-size:11px; margin-left:8px;">✓✓</span>` 
-                        : `<span style="color:#ccc; font-size:11px; margin-left:8px;">✓</span>`;
+                        ? `<span style="color:#4dabf7; font-size:11px; margin-left:8px; text-shadow:1px 1px 1px black;">✓✓</span>` 
+                        : `<span style="color:#ccc; font-size:11px; margin-left:8px; text-shadow:1px 1px 1px black;">✓</span>`;
                 }
 
                 let deleteBtn = "";
@@ -422,11 +443,13 @@ function loadMessages() {
 
                 let content = "";
                 if (m.type === 'image') {
-                    content = `<img src="${m.text}" class="chat-img-msg" onclick="openFullImage('${m.text}')">`;
+                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;"><img src="${m.text}" class="chat-img-msg" onclick="openFullImage('${m.text}')">${readReceipt}</div>`;
                 } else if (m.type === 'video') {
-                    content = `<video src="${m.text}" controls class="chat-img-msg"></video>`;
+                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;"><video src="${m.text}" controls class="chat-img-msg"></video>${readReceipt}</div>`;
+                } else if (m.type === 'sticker') {
+                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;"><img src="${m.text}" onclick="openFullImage('${m.text}')" style="width: 130px; height: 130px; object-fit: contain; background: transparent; cursor: pointer;">${readReceipt}</div>`;
                 } else if (m.type === 'audio') {
-                    content = `<audio src="${m.text}" controls preload="metadata" style="max-width: 200px; height: 35px;"></audio>`;
+                    content = `<div style="display:flex; align-items:flex-end;"><audio src="${m.text}" controls preload="metadata" style="max-width: 200px; height: 35px;"></audio>${readReceipt}</div>`;
                 } else {
                     content = `<div class="msg-bubble" style="background:${isMine ? 'var(--primary)' : '#444'};">
                                 <span>${m.text}</span>${readReceipt}
@@ -453,10 +476,15 @@ function loadMessages() {
             const data = snap.val() || {};
             const tipando = Object.keys(data).filter(u => u !== currentUser && data[u]);
             const indicator = document.getElementById("typingIndicator");
-            if (tipando.length > 0) {
-                indicator.innerText = `${tipando[0]} está digitando...`;
-                indicator.style.display = "block";
-            } else { indicator.style.display = "none"; }
+            if(indicator){
+                if (tipando.length > 0) {
+                    indicator.innerText = `${tipando[0]} está digitando...`;
+                    indicator.innerText = `${tipando[0]} está digitando...`;
+                    indicator.style.display = "block";
+                } else { 
+                    indicator.style.display = "none"; 
+                }
+            }
         });
 
     }).catch(err => console.error(err));
@@ -466,19 +494,23 @@ window.apagarMensagem = (key) => {
     if(confirm("Apagar mensagem?")) remove(ref(db, `chats/${activeChatId}/${key}`));
 };
 
-document.getElementById("backToProfile").onclick = () => {
-    if (activeChatId && currentUser) {
-        set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
-    }
-    activeChatId = null;
-    if (chatUnsubscribe) { chatUnsubscribe(); chatUnsubscribe = null; }
-    if (statusUnsubscribe) { statusUnsubscribe(); statusUnsubscribe = null; }
-    if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
-    showScreen("profile-screen");
-};
+const backToProfile = document.getElementById("backToProfile");
+if(backToProfile) {
+    backToProfile.onclick = () => {
+        if (activeChatId && currentUser) {
+            set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
+        }
+        activeChatId = null;
+        if (chatUnsubscribe) { chatUnsubscribe(); chatUnsubscribe = null; }
+        if (statusUnsubscribe) { statusUnsubscribe(); statusUnsubscribe = null; }
+        if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
+        showScreen("profile-screen");
+    };
+}
 
 // --- ENVIO DE MÍDIAS E TEXTO ---
 async function sendMessage() {
+    if(!campoTexto) return;
     const texto = campoTexto.value.trim();
     if (texto !== "" && activeChatId) {
         try {
@@ -490,7 +522,7 @@ async function sendMessage() {
                 read: false
             });
             campoTexto.value = "";
-            iconeBotao.innerText = "🎤";
+            if(iconeBotao) iconeBotao.innerText = "🎤";
             set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false); 
         } catch (e) {
             console.error("Erro ao enviar:", e);
@@ -499,6 +531,7 @@ async function sendMessage() {
 }
 
 async function handleAudio() {
+    if(!iconeBotao) return;
     if (iconeBotao.innerText === "🎤") {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -512,32 +545,31 @@ async function handleAudio() {
             };
 
             mediaRecorder.onstop = async () => {
-    const audioBlob = new Blob(audioChunks, { type: mimeType });
-    audioChunks = [];
+                const audioBlob = new Blob(audioChunks, { type: mimeType });
+                audioChunks = [];
 
-    if (!activeChatId || audioBlob.size < 100) return;
+                if (!activeChatId || audioBlob.size < 100) return;
 
-    // Convertendo o áudio em texto (Base64)
-    const reader = new FileReader();
-    reader.readAsDataURL(audioBlob);
-    reader.onloadend = async () => {
-        const base64Audio = reader.result;
+                const reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = async () => {
+                    const base64Audio = reader.result;
 
-        try {
-            await push(ref(db, `chats/${activeChatId}`), {
-                sender: currentUser,
-                text: base64Audio, // Enviamos o texto gigante do áudio direto pro banco
-                type: 'audio',
-                timestamp: Date.now(),
-                read: false
-            });
-        } catch (error) {
-            console.error("Erro ao enviar áudio:", error);
-        }
-    };
-    
-    if (stream) stream.getTracks().forEach(track => track.stop());
-};
+                    try {
+                        await push(ref(db, `chats/${activeChatId}`), {
+                            sender: currentUser,
+                            text: base64Audio, 
+                            type: 'audio',
+                            timestamp: Date.now(),
+                            read: false
+                        });
+                    } catch (error) {
+                        console.error("Erro ao enviar áudio:", error);
+                    }
+                };
+                
+                if (stream) stream.getTracks().forEach(track => track.stop());
+            };
 
             mediaRecorder.start(); 
             iconeBotao.innerText = "⏹️"; 
@@ -555,64 +587,106 @@ async function handleAudio() {
     }
 }
 
-campoTexto.addEventListener("input", () => {
-    iconeBotao.innerText = campoTexto.value.trim() !== "" ? "➤" : "🎤";
+if(campoTexto) {
+    campoTexto.addEventListener("input", () => {
+        if(iconeBotao) iconeBotao.innerText = campoTexto.value.trim() !== "" ? "➤" : "🎤";
 
-    if (activeChatId && currentUser) {
-        set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), true);
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => {
-            if(activeChatId) set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
-        }, 2000);
-    }
-});
-
-document.getElementById("actionBtn").onclick = (e) => {
-    e.preventDefault(); 
-    if (iconeBotao.innerText === "➤") sendMessage();
-    else handleAudio();
-};
-
-document.getElementById("mediaInput").onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file || !activeChatId) return;
-
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onloadend = async () => {
-        const base64 = reader.result;
-        
-        try {
-            await push(ref(db, `chats/${activeChatId}`), {
-                sender: currentUser,
-                text: base64,
-                type: (file.type && file.type.startsWith('video')) ? 'video' : 'image',
-                timestamp: Date.now(),
-                read: false 
-            });
-            e.target.value = ''; 
-        } catch (error) { 
-            alert("Erro ao enviar arquivo.");
+        if (activeChatId && currentUser) {
+            set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), true);
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => {
+                if(activeChatId) set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
+            }, 2000);
         }
+    });
+}
+
+const actionBtn = document.getElementById("actionBtn");
+if(actionBtn) {
+    actionBtn.onclick = (e) => {
+        e.preventDefault(); 
+        if (iconeBotao && iconeBotao.innerText === "➤") sendMessage();
+        else handleAudio();
     };
-};
+}
+
+const mediaInput = document.getElementById("mediaInput");
+if(mediaInput) {
+    mediaInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file || !activeChatId) return;
+
+        if (file.size > 5 * 1024 * 1024) { 
+            alert("Atenção: Seu arquivo é maior que 5MB. Como não usamos o Firebase Storage, o envio pode falhar ou travar.");
+        }
+
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onloadend = async () => {
+            const base64 = reader.result;
+            try {
+                await push(ref(db, `chats/${activeChatId}`), {
+                    sender: currentUser,
+                    text: base64,
+                    type: (file.type && file.type.startsWith('video')) ? 'video' : 'image',
+                    timestamp: Date.now(),
+                    read: false 
+                });
+                e.target.value = ''; 
+            } catch (error) { 
+                alert("Erro ao enviar arquivo.");
+            }
+        };
+    };
+}
+
+const stickerInput = document.getElementById("stickerInput");
+if(stickerInput) {
+    stickerInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file || !activeChatId) return;
+
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onloadend = async () => {
+            const base64 = reader.result;
+            try {
+                await push(ref(db, `chats/${activeChatId}`), {
+                    sender: currentUser,
+                    text: base64,
+                    type: 'sticker',
+                    timestamp: Date.now(),
+                    read: false 
+                });
+                e.target.value = ''; 
+            } catch (error) { 
+                alert("Erro ao criar figurinha.");
+            }
+        };
+    };
+}
 
 // --- AMIGOS, DMs E GRUPOS ---
-document.getElementById("addFriendBtn").onclick = async () => {
-    const f = document.getElementById("friendIdInput").value.trim().toLowerCase();
-    if (!f || f === currentUser) return;
-    const check = await get(ref(db, "users/" + f));
-    if (check.exists()) {
-        isGroup = false;
-        activeChatId = [currentUser, f].sort().join("_");
-        
-        await remove(ref(db, `users/${currentUser}/hiddenDMs/${activeChatId}`));
-        document.getElementById("deleteGroupBtn").style.display = "none";
-        document.getElementById("addMemberBtn").style.display = "none";
-        
-        abrirChat(f);
-    } else { alert("Usuário não encontrado!"); }
-};
+const addFriendBtn = document.getElementById("addFriendBtn");
+if(addFriendBtn){
+    addFriendBtn.onclick = async () => {
+        const f = document.getElementById("friendIdInput").value.trim().toLowerCase();
+        if (!f || f === currentUser) return;
+        const check = await get(ref(db, "users/" + f));
+        if (check.exists()) {
+            isGroup = false;
+            activeChatId = [currentUser, f].sort().join("_");
+            
+            await remove(ref(db, `users/${currentUser}/hiddenDMs/${activeChatId}`));
+            const delGrpBtn = document.getElementById("deleteGroupBtn");
+            const addMemBtn = document.getElementById("addMemberBtn");
+            if(delGrpBtn) delGrpBtn.style.display = "none";
+            if(addMemBtn) addMemBtn.style.display = "none";
+            
+            abrirChat(f);
+        } else { alert("Usuário não encontrado!"); }
+    };
+}
 
 function loadDMs() {
     if (dmsChatsUnsubscribe) dmsChatsUnsubscribe();
@@ -674,7 +748,7 @@ function loadDMs() {
                             loadDMs(); 
                         }
                     };
-
+                                        
                     div.appendChild(btn); 
                     div.appendChild(closeBtn); 
                     list.appendChild(div);
@@ -727,45 +801,36 @@ function loadGroups() {
     });
 }
 
-document.getElementById("createGroupBtn").onclick = async () => {
-    const nome = document.getElementById("groupNameInput").value.trim();
-    if (!nome) return;
-    const gRef = push(ref(db, "groups"));
-    await set(gRef, { name: nome, admin: currentUser, members: { [currentUser]: true } });
-    document.getElementById("groupNameInput").value = "";
-};
+const createGroupBtn = document.getElementById("createGroupBtn");
+if(createGroupBtn){
+    createGroupBtn.onclick = async () => {
+        const nome = document.getElementById("groupNameInput").value.trim();
+        if (!nome) return;
+        const gRef = push(ref(db, "groups"));
+        await set(gRef, { name: nome, admin: currentUser, members: { [currentUser]: true } });
+        document.getElementById("groupNameInput").value = "";
+    };
+}
 
-document.getElementById("deleteGroupBtn").onclick = async () => {
-    if (!isGroup || !activeChatId) return;
-    const snap = await get(ref(db, `groups/${activeChatId}`));
-    if (!snap.exists()) { showScreen("profile-screen"); return; }
+const deleteGroupBtn = document.getElementById("deleteGroupBtn");
+if(deleteGroupBtn){
+    deleteGroupBtn.onclick = async () => {
+        abrirTelaGrupo();
+    };
+}
 
-    const g = snap.val();
-    const isAdmin = g.admin === currentUser;
-
-    if (isAdmin) {
-        if (confirm("Apagar este grupo para todos?")) {
-            await remove(ref(db, `groups/${activeChatId}`));
-            await remove(ref(db, `chats/${activeChatId}`));
-            showScreen("profile-screen");
-        }
-    } else {
-        if (confirm("Deseja sair deste grupo?")) {
-            await remove(ref(db, `groups/${activeChatId}/members/${currentUser}`));
-            showScreen("profile-screen");
-        }
-    }
-};
-
-document.getElementById("addMemberBtn").onclick = async () => {
-    const novoMembro = prompt("Digite o login do usuário para adicionar:");
-    if (!novoMembro) return;
-    const userSnap = await get(ref(db, `users/${novoMembro.toLowerCase()}`));
-    if (userSnap.exists()) {
-        await update(ref(db, `groups/${activeChatId}/members`), { [novoMembro.toLowerCase()]: true });
-        alert("Membro adicionado!");
-    } else { alert("Usuário não encontrado."); }
-};
+const addMemberBtn = document.getElementById("addMemberBtn");
+if(addMemberBtn){
+    addMemberBtn.onclick = async () => {
+        const novoMembro = prompt("Digite o login do usuário para adicionar:");
+        if (!novoMembro) return;
+        const userSnap = await get(ref(db, `users/${novoMembro.toLowerCase()}`));
+        if (userSnap.exists()) {
+            await update(ref(db, `groups/${activeChatId}/members`), { [novoMembro.toLowerCase()]: true });
+            alert("Membro adicionado!");
+        } else { alert("Usuário não encontrado."); }
+    };
+}
 
 const areaClique = document.getElementById("headerClickArea");
 if (areaClique) {
@@ -774,7 +839,10 @@ if (areaClique) {
     };
 }
 
-document.getElementById("closeGroupInfoBtn").onclick = () => document.getElementById("group-info-screen").style.display = "none";
+const closeGroupInfoBtn = document.getElementById("closeGroupInfoBtn");
+if(closeGroupInfoBtn){
+    closeGroupInfoBtn.onclick = () => document.getElementById("group-info-screen").style.display = "none";
+}
 
 function abrirTelaGrupo() {
     document.getElementById("group-info-screen").style.display = "block";
@@ -782,74 +850,135 @@ function abrirTelaGrupo() {
         const g = snap.val();
         if (!g) return;
 
-        document.getElementById("groupInfoName").innerText = g.name;
-        document.getElementById("groupPhotoPreview").src = g.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+        const groupNameElem = document.getElementById("groupInfoName");
+        const groupPhotoElem = document.getElementById("groupPhotoPreview");
+        
+        if(groupNameElem) groupNameElem.innerText = g.name;
+        if(groupPhotoElem) groupPhotoElem.src = g.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 
-        const souAdmin = (g.admin === currentUser) || (g.admins && g.admins[currentUser]);
+        const isOwner = (g.admin === currentUser);
+        const isMembroAdmin = isOwner || (g.admins && g.admins[currentUser]);
 
-        document.getElementById("editGroupNameBtn").style.display = souAdmin ? "block" : "none";
-        document.getElementById("groupAddMemberDiv").style.display = souAdmin ? "block" : "none";
-        document.getElementById("groupPhotoPreview").onclick = () => { if (souAdmin) document.getElementById("groupPhotoInput").click(); };
+        const editGrpNameBtn = document.getElementById("editGroupNameBtn");
+        const grpAddMemDiv = document.getElementById("groupAddMemberDiv");
+        
+        if(editGrpNameBtn) editGrpNameBtn.style.display = isMembroAdmin ? "block" : "none";
+        if(grpAddMemDiv) grpAddMemDiv.style.display = isMembroAdmin ? "block" : "none";
+        
+        const deleteGroupBtnInfo = document.getElementById("deleteGroupBtnInfo");
+        const leaveGroupBtnInfo = document.getElementById("leaveGroupBtnInfo");
+        
+        if(deleteGroupBtnInfo) {
+            deleteGroupBtnInfo.style.display = isOwner ? "block" : "none";
+            deleteGroupBtnInfo.onclick = async () => {
+                if(confirm("Deseja realmente apagar este grupo para todos? Essa ação não pode ser desfeita.")) {
+                    await remove(ref(db, `groups/${activeChatId}`));
+                    await remove(ref(db, `chats/${activeChatId}`));
+                    document.getElementById("group-info-screen").style.display = "none";
+                    showScreen("profile-screen");
+                }
+            };
+        }
+        
+        if(leaveGroupBtnInfo) {
+            leaveGroupBtnInfo.onclick = async () => {
+                if(confirm("Deseja sair deste grupo?")) {
+                    if (isOwner) {
+                        const members = Object.keys(g.members || {}).filter(m => m !== currentUser);
+                        if (members.length === 0) {
+                            await remove(ref(db, `groups/${activeChatId}`));
+                            await remove(ref(db, `chats/${activeChatId}`));
+                        } else {
+                            let newAdmin = members.find(m => g.admins && g.admins[m]);
+                            if (!newAdmin) newAdmin = members[Math.floor(Math.random() * members.length)];
+                            await update(ref(db, `groups/${activeChatId}`), { admin: newAdmin });
+                            await update(ref(db, `groups/${activeChatId}/admins`), { [newAdmin]: true });
+                            await remove(ref(db, `groups/${activeChatId}/members/${currentUser}`));
+                            await remove(ref(db, `groups/${activeChatId}/admins/${currentUser}`));
+                        }
+                    } else {
+                        await remove(ref(db, `groups/${activeChatId}/members/${currentUser}`));
+                        await remove(ref(db, `groups/${activeChatId}/admins/${currentUser}`));
+                    }
+                    document.getElementById("group-info-screen").style.display = "none";
+                    showScreen("profile-screen");
+                }
+            };
+        }
 
-        document.getElementById("editGroupNameBtn").onclick = async () => {
-            const novoNome = prompt("Novo nome do grupo:", g.name);
-            if (novoNome && novoNome.trim() !== "") {
-                await update(ref(db, `groups/${activeChatId}`), { name: novoNome });
-                document.getElementById("chatWithTitle").innerText = novoNome;
-            }
-        };
+        if(groupPhotoElem) {
+            groupPhotoElem.onclick = () => { 
+                if (isMembroAdmin) document.getElementById("groupPhotoInput")?.click(); 
+            };
+        }
+        
+        if(editGrpNameBtn) {
+            editGrpNameBtn.onclick = async () => {
+                const novoNome = prompt("Novo nome do grupo:", g.name);
+                if (novoNome && novoNome.trim() !== "") {
+                    await update(ref(db, `groups/${activeChatId}`), { name: novoNome });
+                    const chatTitle = document.getElementById("chatWithTitle");
+                    if(chatTitle) chatTitle.innerText = novoNome;
+                }
+            };
+        }
 
         const membersList = document.getElementById("groupMembersList");
-        membersList.innerHTML = "";
-        const usersSnap = await get(ref(db, "users"));
-        const allUsers = usersSnap.val() || {};
+        if(membersList) {
+            membersList.innerHTML = "";
+            const usersSnap = await get(ref(db, "users"));
+            const allUsers = usersSnap.val() || {};
 
-        Object.keys(g.members || {}).forEach(membro => {
-            const isMembroAdmin = (g.admin === membro) || (g.admins && g.admins[membro]);
-            const userData = allUsers[membro] || {};
-            const foto = userData.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
-            const statusColor = userData.status === "online" ? "#2ecc71" : "#aaa";
-            const statusText = userData.status === "online" ? "● Online" : "○ Offline";
-            
-            const div = document.createElement("div");
-            div.style.cssText = "display:flex; align-items:center; text-align:left; background:var(--bg-light); padding:10px; border-radius:8px;";
+            Object.keys(g.members || {}).forEach(membro => {
+                const ehAdmin = (g.admin === membro) || (g.admins && g.admins[membro]);
+                const userData = allUsers[membro] || {};
+                const foto = userData.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+                const statusColor = userData.status === "online" ? "#2ecc71" : "#aaa";
+                const statusText = userData.status === "online" ? "● Online" : "○ Offline";
+                
+                const div = document.createElement("div");
+                div.style.cssText = "display:flex; align-items:center; text-align:left; background:var(--bg-light); padding:10px; border-radius:8px;";
 
-            let botoesAdmin = "";
-            if (souAdmin && membro !== currentUser) {
-                botoesAdmin = `
-                    <button onclick="promoverRebaixar('${membro}', ${isMembroAdmin})" style="background:${isMembroAdmin ? 'var(--warning)' : 'var(--primary)'}; font-size:10px; padding:5px; margin-left:auto;">
-                        ${isMembroAdmin ? 'Remover Admin' : 'Dar Admin'}
-                    </button>
-                    <button onclick="removerDoGrupo('${membro}')" style="background:var(--danger); font-size:10px; padding:5px; margin-left:5px;">Expulsar</button>
-                `;
-            }
+                let botoesAdmin = "";
+                if (isMembroAdmin && membro !== currentUser) {
+                    botoesAdmin = `
+                        <button onclick="promoverRebaixar('${membro}', ${ehAdmin})" style="background:${ehAdmin ? 'var(--warning)' : 'var(--primary)'}; font-size:10px; padding:5px; margin-left:auto;">
+                            ${ehAdmin ? 'Remover Admin' : 'Dar Admin'}
+                        </button>
+                        <button onclick="removerDoGrupo('${membro}')" style="background:var(--danger); font-size:10px; padding:5px; margin-left:5px;">Expulsar</button>
+                    `;
+                }
 
-            div.innerHTML = `
-                <img src="${foto}" style="width:35px; height:35px; border-radius:50%; object-fit:cover; margin-right:10px;">
-                <div style="flex:1; display:flex; flex-direction:column; align-items:flex-start;"> 
-                    <div style="display:flex; align-items:center;">
-                        <span style="font-weight:bold; color: white;">${membro}</span>
-                        ${isMembroAdmin ? '<span style="color:var(--success); font-size:11px; margin-left:5px;">(Admin)</span>' : ''}
+                div.innerHTML = `
+                    <img src="${foto}" style="width:35px; height:35px; border-radius:50%; object-fit:cover; margin-right:10px;">
+                    <div style="flex:1; display:flex; flex-direction:column; align-items:flex-start;"> 
+                        <div style="display:flex; align-items:center;">
+                            <span style="font-weight:bold; color: white;">${membro}</span>
+                            ${ehAdmin ? '<span style="color:var(--success); font-size:11px; margin-left:5px;">(Admin)</span>' : ''}
+                        </div>
+                        <span style="color:${statusColor}; font-size:11px; margin-top:2px;">${statusText}</span>
                     </div>
-                    <span style="color:${statusColor}; font-size:11px; margin-top:2px;">${statusText}</span>
-                </div>
-                ${botoesAdmin}
-            `;
-            membersList.appendChild(div);
-        });
+                    ${botoesAdmin}
+                `;
+                membersList.appendChild(div);
+            });
+        }
     });
 }
 
-document.getElementById("addNewGroupMemberBtn").onclick = async () => {
-    const novo = document.getElementById("newGroupMemberInput").value.trim().toLowerCase();
-    if (!novo) return;
-    const userSnap = await get(ref(db, `users/${novo}`));
-    if (userSnap.exists()) {
-        await update(ref(db, `groups/${activeChatId}/members`), { [novo]: true });
-        document.getElementById("newGroupMemberInput").value = "";
-        alert("Usuário adicionado!");
-    } else { alert("Usuário não existe!"); }
-};
+const addNewGroupMemberBtn = document.getElementById("addNewGroupMemberBtn");
+if(addNewGroupMemberBtn){
+    addNewGroupMemberBtn.onclick = async () => {
+        const novo = document.getElementById("newGroupMemberInput").value.trim().toLowerCase();
+        if (!novo) return;
+        const userSnap = await get(ref(db, `users/${novo}`));
+        if (userSnap.exists()) {
+            await update(ref(db, `groups/${activeChatId}/members`), { [novo]: true });
+            document.getElementById("newGroupMemberInput").value = "";
+            alert("Usuário adicionado!");
+        } else { alert("Usuário não existe!"); }
+    };
+}
 
 window.promoverRebaixar = async (membro, isJaAdmin) => {
     if (isJaAdmin) {
@@ -869,10 +998,97 @@ window.removerDoGrupo = async (membro) => {
 window.openFullImage = (src) => {
     const modal = document.getElementById("imageModal");
     const modalImg = document.getElementById("modalImg");
+    const downloadBtn = document.getElementById("downloadImageBtn");
+    if(!modal || !modalImg || !downloadBtn) return;
+    
     modalImg.src = src;
+    downloadBtn.href = src; 
     modalImg.style.transform = "scale(1)";
     modal.style.display = "flex";
 };
+
+// --- NOVA LÓGICA DE FAVORITOS (FIGURINHAS) ---
+const favoriteImageBtn = document.getElementById("favoriteImageBtn");
+if(favoriteImageBtn){
+    favoriteImageBtn.onclick = async (e) => {
+        e.preventDefault();
+        const modalImg = document.getElementById("modalImg");
+        if(!modalImg) return;
+        const src = modalImg.src;
+        if(!currentUser) return;
+        try {
+            await push(ref(db, `users/${currentUser}/favorites`), src);
+            alert("Figurinha salva nos favoritos!");
+            document.getElementById("imageModal").style.display = 'none';
+        } catch(err) {
+            alert("Erro ao favoritar.");
+        }
+    };
+}
+
+const openFavoritesBtn = document.getElementById("openFavoritesBtn");
+if(openFavoritesBtn){
+    openFavoritesBtn.onclick = async () => {
+        if(!currentUser) return;
+        const modal = document.getElementById("favoritesModal");
+        if(modal) modal.style.display = "flex";
+        
+        const grid = document.getElementById("favoritesGrid");
+        if(!grid) return;
+        grid.innerHTML = "<p style='width: 100%; text-align: center;'>Carregando...</p>";
+        
+        get(ref(db, `users/${currentUser}/favorites`)).then(snap => {
+            grid.innerHTML = "";
+            if(!snap.exists()) {
+                grid.innerHTML = "<p style='width: 100%; text-align: center;'>Nenhuma figurinha salva ainda.</p>";
+                return;
+            }
+            snap.forEach(child => {
+                const imgBase64 = child.val();
+                const key = child.key;
+                
+                const wrapper = document.createElement("div");
+                wrapper.style.position = "relative";
+                
+                const img = document.createElement("img");
+                img.src = imgBase64;
+                img.style.cssText = "width: 80px; height: 80px; object-fit: contain; cursor: pointer; background: rgba(0,0,0,0.2); border-radius: 8px;";
+                img.onclick = () => window.sendFavoriteSticker(imgBase64);
+                
+                const delBtn = document.createElement("button");
+                delBtn.innerText = "🗑️";
+                delBtn.style.cssText = "position: absolute; top: -5px; right: -5px; background: red; padding: 2px 5px; font-size: 10px; border-radius: 50%;";
+                delBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    remove(ref(db, `users/${currentUser}/favorites/${key}`));
+                    wrapper.remove();
+                };
+                
+                wrapper.appendChild(img);
+                wrapper.appendChild(delBtn);
+                grid.appendChild(wrapper);
+            });
+        });
+    };
+}
+
+window.sendFavoriteSticker = async (base64) => {
+    if (!activeChatId) return;
+    try {
+        await push(ref(db, `chats/${activeChatId}`), {
+            sender: currentUser,
+            text: base64,
+            type: 'sticker',
+            timestamp: Date.now(),
+            read: false 
+        });
+        const favModal = document.getElementById("favoritesModal");
+        if(favModal) favModal.style.display = "none";
+    } catch (error) { 
+        alert("Erro ao enviar figurinha.");
+    }
+};
+
 
 const alternarTema = () => {
     const isLight = document.body.classList.toggle("light-mode");
@@ -899,7 +1115,7 @@ if (colorPicker) {
 }
 
 const wallpaperBtn = document.getElementById("wallpaperBtn");
-if (wallpaperBtn) wallpaperBtn.onclick = () => document.getElementById("wallpaperInput").click();
+if (wallpaperBtn) wallpaperBtn.onclick = () => document.getElementById("wallpaperInput")?.click();
 
 function iniciarNotificacoesGlobais() {
     onValue(ref(db, "chats"), snap => {
