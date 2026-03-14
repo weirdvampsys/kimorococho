@@ -38,12 +38,85 @@ let currentCropType = 'profile';
 let typingTimeout;
 let mediaRecorder;
 let audioChunks = [];
+let respondendoMensagem = null;
 
 // --- ELEMENTOS DOM FREQUENTES ---
 const campoTexto = document.getElementById("messageInput");
 const iconeBotao = document.getElementById("actionIcon");
 
-// Função para gerenciar se você está online ou não
+// --- FUNÇÕES GLOBAIS (Atreladas ao Window para onclicks do HTML dinâmico) ---
+window.apagarMensagem = (key) => {
+    if(confirm("Apagar mensagem?")) remove(ref(db, `chats/${activeChatId}/${key}`));
+};
+
+window.prepararResposta = (texto, autor) => {
+    respondendoMensagem = { texto, autor };
+    const divResposta = document.getElementById("reply-preview");
+    if(divResposta) {
+        divResposta.style.display = "flex";
+        divResposta.innerHTML = `
+            <div style="border-left: 4px solid var(--primary); padding-left: 10px; background: rgba(0,0,0,0.1); flex: 1; min-width: 0; border-radius: 4px; text-align: left;">
+                <small style="color: var(--primary); font-weight: bold; display: block;">${autor}</small>
+                <p style="margin: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #ccc; width: 100%;">
+                    ${texto}
+                </p>
+            </div>
+            <button onclick="cancelarResposta()" style="background:none; color:var(--danger); padding: 10px; margin-left: 5px; border:none; cursor:pointer; font-weight:bold; flex-shrink: 0;">✕</button>
+        `;
+    }
+};
+
+window.cancelarResposta = () => {
+    respondendoMensagem = null;
+    const div = document.getElementById("reply-preview");
+    if(div) div.style.display = "none";
+};
+
+window.promoverRebaixar = async (membro, isJaAdmin) => {
+    if (isJaAdmin) {
+        if(confirm(`Tirar admin de ${membro}?`)) await remove(ref(db, `groups/${activeChatId}/admins/${membro}`));
+    } else {
+        if(confirm(`Dar admin para ${membro}?`)) await update(ref(db, `groups/${activeChatId}/admins`), { [membro]: true });
+    }
+};
+
+window.removerDoGrupo = async (membro) => {
+    if(confirm(`Expulsar ${membro} do grupo?`)) {
+        await remove(ref(db, `groups/${activeChatId}/members/${membro}`));
+        await remove(ref(db, `groups/${activeChatId}/admins/${membro}`));
+    }
+};
+
+window.openFullImage = (src) => {
+    const modal = document.getElementById("imageModal");
+    const modalImg = document.getElementById("modalImg");
+    const downloadBtn = document.getElementById("downloadImageBtn");
+    if(!modal || !modalImg || !downloadBtn) return;
+    
+    modalImg.src = src;
+    downloadBtn.href = src; 
+    modalImg.style.transform = "scale(1)";
+    modal.style.display = "flex";
+};
+
+window.sendFavoriteSticker = async (base64) => {
+    if (!activeChatId) return;
+    try {
+        await push(ref(db, `chats/${activeChatId}`), {
+            sender: currentUser,
+            text: base64,
+            type: 'sticker',
+            timestamp: Date.now(),
+            read: false 
+        });
+        const favModal = document.getElementById("favoritesModal");
+        if(favModal) favModal.style.display = "none";
+    } catch (error) { 
+        alert("Erro ao enviar figurinha.");
+    }
+};
+
+// --- FUNÇÕES DE STATUS E NOTIFICAÇÃO ---
 function gerenciarPresenca() {
     if (!currentUser) return;
     const myStatusRef = ref(db, `users/${currentUser}/status`);
@@ -54,6 +127,48 @@ function gerenciarPresenca() {
             set(myStatusRef, "online");
             onDisconnect(myStatusRef).set("offline");
         }
+    });
+}
+
+function iniciarNotificacoesGlobais() {
+    if ("Notification" in window && Notification.permission === "default") {
+        setTimeout(() => {
+            if(confirm("Deseja ativar as notificações para saber quando mandarem mensagem fora do site?")) {
+                Notification.requestPermission();
+            }
+        }, 2000);
+    }
+
+    onValue(ref(db, "chats"), snap => {
+        if (!currentUser) return;
+        if (document.visibilityState !== "hidden") return;
+
+        snap.forEach(chatSnap => {
+            const chatId = chatSnap.key;
+            if (chatId.includes('_') && !chatId.includes(currentUser)) return;
+            if (chatId === activeChatId) return;
+            const msgs = chatSnap.val();
+            if (!msgs) return;
+            const keys = Object.keys(msgs).filter(k => k !== 'typing');
+            if (keys.length === 0) return;
+            
+            const lastKey = keys[keys.length - 1];
+            const lastMsg = msgs[lastKey];
+
+            if (lastMsg && lastMsg.sender !== currentUser) {
+                const notifKey = `notificado_${lastKey}`;
+                if (Date.now() - lastMsg.timestamp < 10000 && !localStorage.getItem(notifKey)) {
+                    localStorage.setItem(notifKey, "true");
+                    
+                    if (Notification.permission === "granted") {
+                        new Notification(`Nova mensagem de ${lastMsg.sender}`, { 
+                            body: lastMsg.text || 'Mídia recebida',
+                            icon: 'https://cdn-icons-png.flaticon.com/512/149/149071.png' 
+                        });
+                    }
+                }
+            }
+        });
     });
 }
 
@@ -429,6 +544,16 @@ function loadMessages() {
                 const row = document.createElement("div");
                 row.className = `message-row ${isMine ? 'my-message-row' : ''}`;
 
+                let timer;
+                row.onmousedown = row.ontouchstart = () => {
+                    timer = setTimeout(() => {
+                        const resumo = m.type === 'text' ? m.text : `[${m.type}]`;
+                        window.prepararResposta(resumo, displayName);
+                        if (navigator.vibrate) navigator.vibrate(50);
+                    }, 600); 
+                };
+                row.onmouseup = row.onmouseleave = row.ontouchend = () => clearTimeout(timer);
+
                 let readReceipt = "";
                 if (isMine) { 
                     readReceipt = m.read 
@@ -438,24 +563,35 @@ function loadMessages() {
 
                 let deleteBtn = "";
                 if (isMine && (Date.now() - m.timestamp <= 60000)) {
-                    deleteBtn = `<span class="del-msg-btn" onclick="apagarMensagem('${msgKey}')" style="cursor:pointer; font-size:12px; margin-right:8px; opacity:0.5;">🗑️</span>`;
+                    deleteBtn = `<span class="del-msg-btn" onclick="window.apagarMensagem('${msgKey}')" style="cursor:pointer; font-size:12px; margin-right:8px; opacity:0.5;">🗑️</span>`;
+                }
+
+                let replyHtml = "";
+                if (m.replyTo) {
+                    replyHtml = `
+                        <div style="background: rgba(0,0,0,0.2); border-left: 3px solid var(--primary); padding: 5px; margin-bottom: 5px; border-radius: 4px; font-size: 11px; text-align: left; cursor: pointer;">
+                            <b style="color: var(--primary);">${m.replyTo.autor}</b><br>
+                            <span style="opacity: 0.8; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${m.replyTo.texto}</span>
+                        </div>
+                    `;
                 }
 
                 let content = "";
                 if (m.type === 'image') {
-                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;"><img src="${m.text}" class="chat-img-msg" onclick="openFullImage('${m.text}')">${readReceipt}</div>`;
+                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<img src="${m.text}" class="chat-img-msg" onclick="window.openFullImage('${m.text}')">${readReceipt}</div>`;
                 } else if (m.type === 'video') {
-                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;"><video src="${m.text}" controls class="chat-img-msg"></video>${readReceipt}</div>`;
+                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<video src="${m.text}" controls class="chat-img-msg"></video>${readReceipt}</div>`;
                 } else if (m.type === 'sticker') {
-                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;"><img src="${m.text}" onclick="openFullImage('${m.text}')" style="width: 130px; height: 130px; object-fit: contain; background: transparent; cursor: pointer;">${readReceipt}</div>`;
+                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<img src="${m.text}" onclick="window.openFullImage('${m.text}')" style="width: 130px; height: 130px; object-fit: contain; background: transparent; cursor: pointer;">${readReceipt}</div>`;
                 } else if (m.type === 'audio') {
-                    content = `<div style="display:flex; align-items:flex-end;"><audio src="${m.text}" controls preload="metadata" style="max-width: 200px; height: 35px;"></audio>${readReceipt}</div>`;
+                    content = `<div style="display:flex; flex-direction:column; align-items:flex-start;">${replyHtml}<div style="display:flex; align-items:flex-end;"><audio src="${m.text}" controls preload="metadata" style="max-width: 200px; height: 35px;"></audio>${readReceipt}</div></div>`;
                 } else {
                     content = `<div class="msg-bubble" style="background:${isMine ? 'var(--primary)' : '#444'};">
+                                ${replyHtml}
                                 <span>${m.text}</span>${readReceipt}
                             </div>`;
                 }
-                
+
                 row.innerHTML = `
                     ${!isMine ? `<img src="${senderPhoto}" class="chat-avatar">` : ''}
                     <div class="msg-wrapper">
@@ -479,7 +615,6 @@ function loadMessages() {
             if(indicator){
                 if (tipando.length > 0) {
                     indicator.innerText = `${tipando[0]} está digitando...`;
-                    indicator.innerText = `${tipando[0]} está digitando...`;
                     indicator.style.display = "block";
                 } else { 
                     indicator.style.display = "none"; 
@@ -489,10 +624,6 @@ function loadMessages() {
 
     }).catch(err => console.error(err));
 }
-
-window.apagarMensagem = (key) => {
-    if(confirm("Apagar mensagem?")) remove(ref(db, `chats/${activeChatId}/${key}`));
-};
 
 const backToProfile = document.getElementById("backToProfile");
 if(backToProfile) {
@@ -508,22 +639,29 @@ if(backToProfile) {
     };
 }
 
-// --- ENVIO DE MÍDIAS E TEXTO ---
 async function sendMessage() {
     if(!campoTexto) return;
     const texto = campoTexto.value.trim();
     if (texto !== "" && activeChatId) {
         try {
-            await push(ref(db, "chats/" + activeChatId), {
+            const dadosMsg = {
                 sender: currentUser,
                 text: texto,
                 type: 'text',
                 timestamp: Date.now(),
                 read: false
-            });
+            };
+
+            if (respondendoMensagem) {
+                dadosMsg.replyTo = respondendoMensagem;
+            }
+
+            await push(ref(db, "chats/" + activeChatId), dadosMsg);
+            
             campoTexto.value = "";
             if(iconeBotao) iconeBotao.innerText = "🎤";
-            set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false); 
+            set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
+            window.cancelarResposta(); 
         } catch (e) {
             console.error("Erro ao enviar:", e);
         }
@@ -639,7 +777,6 @@ if(mediaInput) {
         };
     };
 }
-
 const stickerInput = document.getElementById("stickerInput");
 if(stickerInput) {
     stickerInput.onchange = async (e) => {
@@ -766,7 +903,6 @@ function loadGroups() {
             if (!list) return;
             list.innerHTML = "";
             const todosOsChats = snapChats.val() || {};
-
             snapGroups.forEach(child => {
                 const g = child.val();
                 if (!g || !g.members || !g.members[currentUser]) return;
@@ -942,10 +1078,10 @@ function abrirTelaGrupo() {
                 let botoesAdmin = "";
                 if (isMembroAdmin && membro !== currentUser) {
                     botoesAdmin = `
-                        <button onclick="promoverRebaixar('${membro}', ${ehAdmin})" style="background:${ehAdmin ? 'var(--warning)' : 'var(--primary)'}; font-size:10px; padding:5px; margin-left:auto;">
+                        <button onclick="window.promoverRebaixar('${membro}', ${ehAdmin})" style="background:${ehAdmin ? 'var(--warning)' : 'var(--primary)'}; font-size:10px; padding:5px; margin-left:auto;">
                             ${ehAdmin ? 'Remover Admin' : 'Dar Admin'}
                         </button>
-                        <button onclick="removerDoGrupo('${membro}')" style="background:var(--danger); font-size:10px; padding:5px; margin-left:5px;">Expulsar</button>
+                        <button onclick="window.removerDoGrupo('${membro}')" style="background:var(--danger); font-size:10px; padding:5px; margin-left:5px;">Expulsar</button>
                     `;
                 }
 
@@ -965,7 +1101,6 @@ function abrirTelaGrupo() {
         }
     });
 }
-
 const addNewGroupMemberBtn = document.getElementById("addNewGroupMemberBtn");
 if(addNewGroupMemberBtn){
     addNewGroupMemberBtn.onclick = async () => {
@@ -980,34 +1115,7 @@ if(addNewGroupMemberBtn){
     };
 }
 
-window.promoverRebaixar = async (membro, isJaAdmin) => {
-    if (isJaAdmin) {
-        if(confirm(`Tirar admin de ${membro}?`)) await remove(ref(db, `groups/${activeChatId}/admins/${membro}`));
-    } else {
-        if(confirm(`Dar admin para ${membro}?`)) await update(ref(db, `groups/${activeChatId}/admins`), { [membro]: true });
-    }
-};
-
-window.removerDoGrupo = async (membro) => {
-    if(confirm(`Expulsar ${membro} do grupo?`)) {
-        await remove(ref(db, `groups/${activeChatId}/members/${membro}`));
-        await remove(ref(db, `groups/${activeChatId}/admins/${membro}`));
-    }
-};
-
-window.openFullImage = (src) => {
-    const modal = document.getElementById("imageModal");
-    const modalImg = document.getElementById("modalImg");
-    const downloadBtn = document.getElementById("downloadImageBtn");
-    if(!modal || !modalImg || !downloadBtn) return;
-    
-    modalImg.src = src;
-    downloadBtn.href = src; 
-    modalImg.style.transform = "scale(1)";
-    modal.style.display = "flex";
-};
-
-// --- NOVA LÓGICA DE FAVORITOS (FIGURINHAS) ---
+// --- FAVORITOS (FIGURINHAS) ---
 const favoriteImageBtn = document.getElementById("favoriteImageBtn");
 if(favoriteImageBtn){
     favoriteImageBtn.onclick = async (e) => {
@@ -1072,24 +1180,7 @@ if(openFavoritesBtn){
     };
 }
 
-window.sendFavoriteSticker = async (base64) => {
-    if (!activeChatId) return;
-    try {
-        await push(ref(db, `chats/${activeChatId}`), {
-            sender: currentUser,
-            text: base64,
-            type: 'sticker',
-            timestamp: Date.now(),
-            read: false 
-        });
-        const favModal = document.getElementById("favoritesModal");
-        if(favModal) favModal.style.display = "none";
-    } catch (error) { 
-        alert("Erro ao enviar figurinha.");
-    }
-};
-
-
+// --- TEMAS E CORES ---
 const alternarTema = () => {
     const isLight = document.body.classList.toggle("light-mode");
     localStorage.setItem("globalTheme", isLight ? "light" : "dark");
@@ -1116,31 +1207,3 @@ if (colorPicker) {
 
 const wallpaperBtn = document.getElementById("wallpaperBtn");
 if (wallpaperBtn) wallpaperBtn.onclick = () => document.getElementById("wallpaperInput")?.click();
-
-function iniciarNotificacoesGlobais() {
-    onValue(ref(db, "chats"), snap => {
-        if (!currentUser) return;
-        snap.forEach(chatSnap => {
-            const chatId = chatSnap.key;
-            if (chatId.includes('_') && !chatId.includes(currentUser)) return;
-            if (chatId === activeChatId) return;
-            const msgs = chatSnap.val();
-            if (!msgs) return;
-            const keys = Object.keys(msgs).filter(k => k !== 'typing');
-            if (keys.length === 0) return;
-            
-            const lastKey = keys[keys.length - 1];
-            const lastMsg = msgs[lastKey];
-
-            if (lastMsg && lastMsg.sender !== currentUser) {
-                const notifKey = `notificado_${lastKey}`;
-                if (Date.now() - lastMsg.timestamp < 10000 && !localStorage.getItem(notifKey)) {
-                    localStorage.setItem(notifKey, "true");
-                    if ("Notification" in window && Notification.permission === "granted") {
-                        new Notification(`Kimorococho - ${lastMsg.sender}`, { body: lastMsg.text || 'Nova mídia recebida' });
-                    }
-                }
-            }
-        });
-    });
-}
