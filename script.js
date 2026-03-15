@@ -1,7 +1,7 @@
-// 1. IMPORTS (Sempre no topo)
+// 1. IMPORTS (Sempre no topo) - FIX 3: updateEmail importado
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getDatabase, ref, get, set, update, push, onValue, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
-import { getAuth, signInWithEmailAndPassword, signOut, updatePassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, signOut, updatePassword, onAuthStateChanged, updateEmail } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { getStorage, ref as sRef, uploadBytes, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
 
@@ -16,22 +16,18 @@ const firebaseConfig = {
     databaseURL: "https://teste66666-fade0-default-rtdb.firebaseio.com"
 };
 
-// 3. INICIALIZAÇÃO
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);               
 const auth = getAuth(app);                 
 const storage = getStorage(app); 
 const messaging = getMessaging(app);
 
-// --- CONSTANTES GLOBAIS ---
 const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 
-// --- ESTADO GLOBAL ---
 let currentUser = null;
 let activeChatId = null;
 let isGroup = false;
 
-// Variáveis para limpar os olheiros (listeners) e evitar duplicação
 let chatUnsubscribe = null;
 let statusUnsubscribe = null; 
 let typingUnsubscribe = null;
@@ -45,39 +41,53 @@ let mediaRecorder;
 let audioChunks = [];
 let respondendoMensagem = null;
 
-// --- ELEMENTOS DOM FREQUENTES ---
 const campoTexto = document.getElementById("messageInput");
 const iconeBotao = document.getElementById("actionIcon");
 
-// --- FUNÇÕES UTILITÁRIAS ---
 function limparListenersChat() {
     if (chatUnsubscribe) { chatUnsubscribe(); chatUnsubscribe = null; }
     if (statusUnsubscribe) { statusUnsubscribe(); statusUnsubscribe = null; }
     if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
 }
 
-// Registro do Service Worker corrigido
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./firebase-messaging-sw.js')
-        .then((reg) => console.log('Service Worker registrado!', reg))
         .catch((err) => console.error('Falha ao registrar SW:', err));
 }
 
+// FIX 7: AVISOS DE ERRO E SITE FORA DO AR GLOBAL
+window.addEventListener('error', () => { 
+    const banner = document.getElementById('system-error-banner');
+    if(banner) banner.style.display = 'block'; 
+});
+window.addEventListener('unhandledrejection', () => { 
+    const banner = document.getElementById('system-error-banner');
+    if(banner) banner.style.display = 'block'; 
+});
 
-// --- FUNÇÕES GLOBAIS (Atreladas ao Window) ---
-window.apagarMensagem = (key) => {
-    if(confirm("Apagar mensagem?")) remove(ref(db, `chats/${activeChatId}/${key}`));
-};
+const connectedRef = ref(db, ".info/connected");
+onValue(connectedRef, (snap) => {
+    const banner = document.getElementById('system-error-banner');
+    if(!banner) return;
+    if (snap.val() === false) {
+        setTimeout(() => { if (!navigator.onLine || snap.val() === false) banner.style.display = 'block'; }, 2000);
+    } else {
+        banner.style.display = 'none';
+    }
+});
+
+window.apagarMensagem = (key) => { if(confirm("Apagar mensagem?")) remove(ref(db, `chats/${activeChatId}/${key}`)); };
 
 window.prepararResposta = (texto, autor) => {
     respondendoMensagem = { texto, autor };
     const divResposta = document.getElementById("reply-preview");
     if(divResposta) {
         divResposta.style.display = "flex";
+        // FIX 2: max-width para evitar ultrapassar a tela
         divResposta.innerHTML = `
-            <div style="border-left: 4px solid var(--primary); padding-left: 10px; background: rgba(0,0,0,0.1); flex: 1; min-width: 0; border-radius: 4px; text-align: left;">
+            <div style="border-left: 4px solid var(--primary); padding-left: 10px; background: rgba(0,0,0,0.1); flex: 1; min-width: 0; border-radius: 4px; text-align: left; max-width: 100%; overflow: hidden;">
                 <small style="color: var(--primary); font-weight: bold; display: block;">${autor}</small>
-                <p style="margin: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #ccc; width: 100%;">
+                <p style="margin: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); width: 100%;">
                     ${texto}
                 </p>
             </div>
@@ -93,11 +103,8 @@ window.cancelarResposta = () => {
 };
 
 window.promoverRebaixar = async (membro, isJaAdmin) => {
-    if (isJaAdmin) {
-        if(confirm(`Tirar admin de ${membro}?`)) await remove(ref(db, `groups/${activeChatId}/admins/${membro}`));
-    } else {
-        if(confirm(`Dar admin para ${membro}?`)) await update(ref(db, `groups/${activeChatId}/admins`), { [membro]: true });
-    }
+    if (isJaAdmin) { if(confirm(`Tirar admin de ${membro}?`)) await remove(ref(db, `groups/${activeChatId}/admins/${membro}`)); } 
+    else { if(confirm(`Dar admin para ${membro}?`)) await update(ref(db, `groups/${activeChatId}/admins`), { [membro]: true }); }
 };
 
 window.removerDoGrupo = async (membro) => {
@@ -112,36 +119,21 @@ window.openFullImage = (src) => {
     const modalImg = document.getElementById("modalImg");
     const downloadBtn = document.getElementById("downloadImageBtn");
     if(!modal || !modalImg || !downloadBtn) return;
-    
-    modalImg.src = src;
-    downloadBtn.href = src; 
-    modalImg.style.transform = "scale(1)";
-    modal.style.display = "flex";
+    modalImg.src = src; downloadBtn.href = src; modalImg.style.transform = "scale(1)"; modal.style.display = "flex";
 };
 
 window.sendFavoriteSticker = async (base64) => {
     if (!activeChatId) return;
     try {
-        await push(ref(db, `chats/${activeChatId}`), {
-            sender: currentUser,
-            text: base64,
-            type: 'sticker',
-            timestamp: Date.now(),
-            read: false 
-        });
+        await push(ref(db, `chats/${activeChatId}`), { sender: currentUser, text: base64, type: 'sticker', timestamp: Date.now(), read: false });
         const favModal = document.getElementById("favoritesModal");
         if(favModal) favModal.style.display = "none";
-    } catch (error) { 
-        alert("Erro ao enviar figurinha.");
-    }
+    } catch (error) { alert("Erro ao enviar figurinha."); }
 };
 
-// --- FUNÇÕES DE STATUS E NOTIFICAÇÃO ---
 function gerenciarPresenca() {
     if (!currentUser) return;
     const myStatusRef = ref(db, `users/${currentUser}/status`);
-    const connectedRef = ref(db, ".info/connected");
-
     onValue(connectedRef, (snap) => {
         if (snap.val() === true) {
             set(myStatusRef, "online");
@@ -154,53 +146,37 @@ async function iniciarNotificacoesGlobais() {
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-            const token = await getToken(messaging, { 
-                vapidKey: "d9ZGLvN4Md1NiSjS8aX6S59btllHpwwWQD_bWuANB80"
-            });
-            if (token && currentUser) {
-                await update(ref(db, `users/${currentUser}`), { pushToken: token });
-            }
+            const token = await getToken(messaging, { vapidKey: "d9ZGLvN4Md1NiSjS8aX6S59btllHpwwWQD_bWuANB80" });
+            if (token && currentUser) await update(ref(db, `users/${currentUser}`), { pushToken: token });
         }
-    } catch (error) {
-        console.error("Erro ao configurar push:", error);
-    }
+    } catch (error) { console.error("Erro ao configurar push:", error); }
 }
 
-// --- VERIFICAÇÃO DE SESSÃO CONTÍNUA ---
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        // Pega o email do Firebase e tira o "@chat.com" pra voltar a ser só o login do usuário
         currentUser = user.email.replace("@chat.com", "");
-        
-        // Esconde o login e mostra o perfil
         showScreen("profile-screen");
         loadProfile();
         gerenciarPresenca();
         iniciarNotificacoesGlobais();
     } else {
-        // Se realmente não tem ninguém logado (ou se a pessoa clicou em Sair)
         currentUser = null;
         showScreen("login-screen");
     }
 });
 
-// --- AUTENTICAÇÃO E SESSÃO ---
 const loginBtn = document.getElementById("loginBtn");
 if(loginBtn) {
     loginBtn.onclick = async () => {
         const u = document.getElementById("username").value.trim().toLowerCase();
         const p = document.getElementById("password").value.trim();
-
         try {
-            loginBtn.style.transform = "scale(0.95)"; // Dá um efeitinho de clique
-            // O Firebase faz o login, e o onAuthStateChanged (lá em cima) vai cuidar de trocar a tela!
+            loginBtn.style.transform = "scale(0.95)"; 
             await signInWithEmailAndPassword(auth, u + "@chat.com", p);
         } catch (e) {
-            alert("Erro ao logar: " + e.message); // Um alerta básico caso errem a senha
+            alert("Erro ao logar: " + e.message); 
             window.registrarErroAdmin("Tentativa de Login", e.message);
-        } finally {
-            loginBtn.style.transform = "scale(1)";
-        }
+        } finally { loginBtn.style.transform = "scale(1)"; }
     };
 }
 
@@ -208,43 +184,33 @@ const logoutBtn = document.getElementById("logoutBtn");
 if (logoutBtn) {
     logoutBtn.onclick = async () => {
         if (!confirm("Tem certeza que deseja sair?")) return;
-        if (currentUser) {
-            await set(ref(db, `users/${currentUser}/status`), "offline");
-        }
+        if (currentUser) await set(ref(db, `users/${currentUser}/status`), "offline");
         await signOut(auth);
         location.reload(); 
     };
 }
 
-// --- NAVEGAÇÃO ---
 function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => {
-        s.style.display = 'none';
-        s.classList.remove('active-flex');
+        s.style.display = 'none'; s.classList.remove('active-flex');
     });
     const screen = document.getElementById(id);
     if (screen) screen.style.display = 'flex'; 
 }
 
-const logarComEnter = (event) => {
-    if (event.key === "Enter") document.getElementById("loginBtn")?.click();
-};
-
+const logarComEnter = (event) => { if (event.key === "Enter") document.getElementById("loginBtn")?.click(); };
 const userField = document.getElementById("username");
 const passField = document.getElementById("password");
 if (userField) userField.addEventListener("keypress", logarComEnter);
 if (passField) passField.addEventListener("keypress", logarComEnter);
 
-// --- GERENCIAMENTO DE PERFIL ---
 function loadProfile() {
     onValue(ref(db, "users/" + currentUser), snap => {
         const d = snap.val();
         if (d) {
             document.getElementById("displayUsername").innerText = d.displayName || currentUser;
             document.getElementById("profilePhoto").src = d.photoUrl || DEFAULT_AVATAR;
-            if (currentUser === "weirdvampsys") {
-                document.getElementById("toggleAdminBtn").style.display = "inline-block";
-            }
+            if (currentUser === "weirdvampsys") document.getElementById("toggleAdminBtn").style.display = "inline-block";
         }
     });
     loadGroups();
@@ -257,28 +223,20 @@ if (btnChangePass) {
         const novaSenha = document.getElementById("newPasswordInput").value.trim();
         if (!currentUser) return alert("Erro: Utilizador não identificado.");
         if (novaSenha.length < 6) return alert("A senha deve ter pelo menos 6 caracteres!");
-
         try {
-            const user = auth.currentUser;
-            if (user) {
-                await updatePassword(user, novaSenha);
+            if (auth.currentUser) {
+                await updatePassword(auth.currentUser, novaSenha);
                 alert("Senha alterada com sucesso!");
                 document.getElementById("newPasswordInput").value = "";
                 document.getElementById("login-change-section").style.display = "none";
-            } else {
-                alert("Erro: Sessão inválida. Tente deslogar e logar novamente.");
-            }
+            } else { alert("Erro: Sessão inválida. Tente deslogar e logar novamente."); }
         } catch (e) {
-            if (e.code === 'auth/requires-recent-login') {
-                alert("Por segurança, saia do aplicativo e faça login novamente antes de mudar a senha.");
-            } else {
-                alert("Erro ao mudar senha: " + e.message);
-            }
+            if (e.code === 'auth/requires-recent-login') alert("Por segurança, saia do aplicativo e faça login novamente antes de mudar a senha.");
+            else alert("Erro ao mudar senha: " + e.message);
         }
     };
 }
 
-// --- SISTEMA DE ADMINISTRAÇÃO ---
 const toggleAdminBtn = document.getElementById("toggleAdminBtn");
 if(toggleAdminBtn){
     toggleAdminBtn.onclick = () => {
@@ -296,14 +254,19 @@ if(changeUsernameBtn){
     changeUsernameBtn.onclick = async () => {
         const novoLogin = document.getElementById("newUsernameInput").value.trim().toLowerCase();
         const antigoLogin = currentUser;
-
         if (!novoLogin || novoLogin === antigoLogin) return alert("Digite um login diferente!");
 
         try {
             const checkSnap = await get(ref(db, `users/${novoLogin}`));
             if (checkSnap.exists()) return alert("Este login já está em uso!");
-
             if (!confirm(`Atenção: Vamos mover todas as suas conversas para '${novoLogin}'. Você será deslogado.`)) return;
+
+            // FIX 3: Atualiza o email na auth verdadeira
+            if (auth.currentUser) {
+                await updateEmail(auth.currentUser, novoLogin + "@chat.com");
+            } else {
+                return alert("Erro de segurança. Saia e entre novamente para alterar o login.");
+            }
 
             const userSnap = await get(ref(db, `users/${antigoLogin}`));
             const dadosAtuais = userSnap.val();
@@ -314,7 +277,6 @@ if(changeUsernameBtn){
                 groupsSnap.forEach(groupChild => {
                     const groupId = groupChild.key;
                     const groupData = groupChild.val();
-
                     if (groupData.members && groupData.members[antigoLogin]) {
                         updates[`groups/${groupId}/members/${novoLogin}`] = true;
                         updates[`groups/${groupId}/members/${antigoLogin}`] = null;
@@ -335,26 +297,21 @@ if(changeUsernameBtn){
                     if (chatId.includes(antigoLogin) && chatId.includes("_")) {
                         const amigo = chatId.replace(antigoLogin, "").replace("_", "");
                         const novoChatId = [novoLogin, amigo].sort().join("_");
-                        
                         await set(ref(db, `chats/${novoChatId}`), chats[chatId]);
                         await remove(ref(db, `chats/${chatId}`));
                         
                         const mensagensSnap = await get(ref(db, `chats/${novoChatId}`));
                         const msgUpdates = {};
-                        mensagensSnap.forEach(m => {
-                            if (m.val().sender === antigoLogin) {
-                                msgUpdates[`chats/${novoChatId}/${m.key}/sender`] = novoLogin;
-                            }
-                        });
+                        mensagensSnap.forEach(m => { if (m.val().sender === antigoLogin) msgUpdates[`chats/${novoChatId}/${m.key}/sender`] = novoLogin; });
                         await update(ref(db), msgUpdates);
                     }
                 }
             }
-
             await set(ref(db, `users/${novoLogin}`), dadosAtuais);
             await remove(ref(db, `users/${antigoLogin}`));
 
-            alert("Migração concluída! Entre com seu novo login.");
+            alert("Migração concluída! Faça login novamente com o novo login.");
+            await signOut(auth);
             location.reload();
         } catch (e) { alert("Erro na migração: " + e.message); }
     };
@@ -367,8 +324,7 @@ if(changeNameBtn){
         if (!novoNome) return alert("Digite um nome válido!");
         try {
             await update(ref(db, `users/${currentUser}`), { displayName: novoNome });
-            alert("Nome atualizado!");
-            document.getElementById("newName").value = "";
+            alert("Nome atualizado!"); document.getElementById("newName").value = "";
         } catch (error) { alert("Erro ao atualizar nome."); }
     };
 }
@@ -392,7 +348,6 @@ if(toggleLoginChangeBtn){
     };
 }
 
-// --- CROPPER (IMAGENS E FOTOS) ---
 const fileInput = document.getElementById("fileInput");
 if(fileInput) fileInput.onchange = (e) => abrirCropper(e, 'profile', 1);
 
@@ -407,26 +362,17 @@ function abrirCropper(e, type, ratio) {
     if (!file) return;
     currentCropType = type;
     const reader = new FileReader();
-    
     reader.onload = (ev) => {
         const modal = document.getElementById("cropperModal");
         const img = document.getElementById("imageToCrop");
         modal.style.display = "flex";
-        
         img.onload = () => {
             if (cropperInstance) cropperInstance.destroy();
-            cropperInstance = new Cropper(img, {
-                aspectRatio: ratio, 
-                viewMode: 1, 
-                guides: true, 
-                background: false, 
-                autoCropArea: 1
-            });
+            cropperInstance = new Cropper(img, { aspectRatio: ratio, viewMode: 1, guides: true, background: false, autoCropArea: 1 });
         };
         img.src = ev.target.result;
     };
-    reader.readAsDataURL(file);
-    e.target.value = ''; 
+    reader.readAsDataURL(file); e.target.value = ''; 
 }
 
 const btnConfirmCrop = document.getElementById("confirmCrop");
@@ -434,19 +380,13 @@ if (btnConfirmCrop) {
     btnConfirmCrop.onclick = async (e) => {
         e.preventDefault(); 
         if (!cropperInstance) return;
-        
-        let cropOptions = (currentCropType === 'profile' || currentCropType === 'group') 
-            ? { width: 400, height: 400 } : { width: 800 }; 
-
+        let cropOptions = (currentCropType === 'profile' || currentCropType === 'group') ? { width: 400, height: 400 } : { width: 800 }; 
         const canvas = cropperInstance.getCroppedCanvas(cropOptions);
         if (!canvas) return alert("Erro ao processar imagem.");
-
         const base64 = canvas.toDataURL("image/jpeg", 0.6);
 
         try {
-            btnConfirmCrop.innerText = "Salvando...";
-            btnConfirmCrop.disabled = true;
-
+            btnConfirmCrop.innerText = "Salvando..."; btnConfirmCrop.disabled = true;
             if (currentCropType === 'profile') {
                 await update(ref(db, `users/${currentUser}`), { photoUrl: base64 });
                 document.getElementById("profilePhoto").src = base64;
@@ -456,16 +396,10 @@ if (btnConfirmCrop) {
                 await set(ref(db, `users/${currentUser}/wallpapers/${activeChatId}`), base64);
                 document.getElementById("messages").style.backgroundImage = `url(${base64})`;
             }
-
             document.getElementById("cropperModal").style.display = "none";
-            cropperInstance.destroy();
-            cropperInstance = null;
-        } catch (error) {
-            alert("Falha ao salvar: " + error.message);
-        } finally {
-            btnConfirmCrop.innerText = "Salvar Foto";
-            btnConfirmCrop.disabled = false;
-        }
+            cropperInstance.destroy(); cropperInstance = null;
+        } catch (error) { alert("Falha ao salvar: " + error.message); } 
+        finally { btnConfirmCrop.innerText = "Salvar Foto"; btnConfirmCrop.disabled = false; }
     };
 }
 
@@ -474,23 +408,17 @@ if (btnCancelCrop) {
     btnCancelCrop.onclick = (e) => {
         e.preventDefault(); 
         document.getElementById("cropperModal").style.display = "none";
-        if (cropperInstance) {
-            cropperInstance.destroy();
-            cropperInstance = null;
-        }
+        if (cropperInstance) { cropperInstance.destroy(); cropperInstance = null; }
     };
 }
 
-// --- CHAT E MENSAGENS ---
 function abrirChat(titulo) {
     limparListenersChat();
-
     const statusLabel = document.getElementById("chatStatus");
     const chatTitleElem = document.getElementById("chatWithTitle");
     
     if(chatTitleElem) chatTitleElem.innerText = titulo;
     if(statusLabel) statusLabel.innerText = ""; 
-    
     showScreen("chat-screen");
 
     if (!isGroup) {
@@ -503,25 +431,18 @@ function abrirChat(titulo) {
                 statusLabel.style.color = isOnline ? "#2ecc71" : "#aaa";
             });
         }
-    } else {
-        if(statusLabel) {
-            statusLabel.innerText = "Conversa em Grupo";
-            statusLabel.style.color = "#aaa";
-        }
-    }
+    } else { if(statusLabel) { statusLabel.innerText = "Conversa em Grupo"; statusLabel.style.color = "#aaa"; } }
 
     get(ref(db, `users/${currentUser}/wallpapers/${activeChatId}`)).then(snap => {
         const msgContainer = document.getElementById("messages");
         if(msgContainer) msgContainer.style.backgroundImage = snap.exists() ? `url(${snap.val()})` : "none";
     });
-
     loadMessages();
 }
 
 function loadMessages() {
     get(ref(db, "users")).then(userSnap => {
         if (!activeChatId) return;
-        
         limparListenersChat();
         const allUsers = userSnap.val() || {};
         
@@ -532,7 +453,6 @@ function loadMessages() {
             
             snap.forEach(child => {
                 if (child.key === "typing") return;
-                
                 const m = child.val();
                 const msgKey = child.key;
                 const isMine = m.sender === currentUser;
@@ -540,9 +460,7 @@ function loadMessages() {
                 const senderPhoto = userData.photoUrl || DEFAULT_AVATAR;
                 const displayName = userData.displayName || m.sender;
                 
-                if (!isMine && !m.read) {
-                    setTimeout(() => update(ref(db, `chats/${activeChatId}/${msgKey}`), { read: true }), 100);
-                }
+                if (!isMine && !m.read) setTimeout(() => update(ref(db, `chats/${activeChatId}/${msgKey}`), { read: true }), 100);
 
                 const row = document.createElement("div");
                 row.className = `message-row ${isMine ? 'my-message-row' : ''}`;
@@ -556,32 +474,22 @@ function loadMessages() {
                 };
                 row.onmouseup = row.onmouseleave = row.ontouchend = () => clearTimeout(timer);
 
-                const readReceipt = isMine 
-                    ? `<span style="color:${m.read ? '#4dabf7' : '#ccc'}; font-size:11px; margin-left:8px; text-shadow:1px 1px 1px black;">${m.read ? '✓✓' : '✓'}</span>` 
-                    : "";
+                const readReceipt = isMine ? `<span style="color:${m.read ? '#4dabf7' : '#ccc'}; font-size:11px; margin-left:8px; text-shadow:1px 1px 1px black;">${m.read ? '✓✓' : '✓'}</span>` : "";
+                const deleteBtn = (isMine && (Date.now() - m.timestamp <= 60000)) ? `<span class="del-msg-btn" onclick="window.apagarMensagem('${msgKey}')" style="cursor:pointer; font-size:12px; margin-right:8px; opacity:0.5;">🗑️</span>` : "";
 
-                const deleteBtn = (isMine && (Date.now() - m.timestamp <= 60000)) 
-                    ? `<span class="del-msg-btn" onclick="window.apagarMensagem('${msgKey}')" style="cursor:pointer; font-size:12px; margin-right:8px; opacity:0.5;">🗑️</span>` 
-                    : "";
-
+                // FIX 2: max-width na bolha de citação para nao quebrar o layout
                 const replyHtml = m.replyTo ? `
-                    <div style="background: rgba(0,0,0,0.2); border-left: 3px solid var(--primary); padding: 5px; margin-bottom: 5px; border-radius: 4px; font-size: 11px; text-align: left; cursor: pointer;">
+                    <div style="background: rgba(0,0,0,0.2); border-left: 3px solid var(--primary); padding: 5px; margin-bottom: 5px; border-radius: 4px; font-size: 11px; text-align: left; cursor: pointer; max-width: 100%; overflow: hidden;">
                         <b style="color: var(--primary);">${m.replyTo.autor}</b><br>
-                        <span style="opacity: 0.8; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${m.replyTo.texto}</span>
+                        <span style="opacity: 0.8; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">${m.replyTo.texto}</span>
                     </div>` : "";
 
                 let content = "";
-                if (m.type === 'image') {
-                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<img src="${m.text}" class="chat-img-msg" onclick="window.openFullImage('${m.text}')">${readReceipt}</div>`;
-                } else if (m.type === 'video') {
-                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<video src="${m.text}" controls class="chat-img-msg"></video>${readReceipt}</div>`;
-                } else if (m.type === 'sticker') {
-                    content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<img src="${m.text}" onclick="window.openFullImage('${m.text}')" style="width: 130px; height: 130px; object-fit: contain; background: transparent; cursor: pointer;">${readReceipt}</div>`;
-                } else if (m.type === 'audio') {
-                    content = `<div style="display:flex; flex-direction:column; align-items:flex-start;">${replyHtml}<div style="display:flex; align-items:flex-end;"><audio src="${m.text}" controls preload="metadata" style="max-width: 200px; height: 35px;"></audio>${readReceipt}</div></div>`;
-                } else {
-                    content = `<div class="msg-bubble" style="background:${isMine ? 'var(--primary)' : '#444'};">${replyHtml}<span>${m.text}</span>${readReceipt}</div>`;
-                }
+                if (m.type === 'image') content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<img src="${m.text}" class="chat-img-msg" onclick="window.openFullImage('${m.text}')">${readReceipt}</div>`;
+                else if (m.type === 'video') content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<video src="${m.text}" controls class="chat-img-msg"></video>${readReceipt}</div>`;
+                else if (m.type === 'sticker') content = `<div style="display:flex; flex-direction:column; align-items:flex-end;">${replyHtml}<img src="${m.text}" onclick="window.openFullImage('${m.text}')" style="width: 130px; height: 130px; object-fit: contain; background: transparent; cursor: pointer;">${readReceipt}</div>`;
+                else if (m.type === 'audio') content = `<div style="display:flex; flex-direction:column; align-items:flex-start;">${replyHtml}<div style="display:flex; align-items:flex-end;"><audio src="${m.text}" controls preload="metadata" style="max-width: 200px; height: 35px;"></audio>${readReceipt}</div></div>`;
+                else content = `<div class="msg-bubble" style="background:${isMine ? 'var(--primary)' : '#444'};">${replyHtml}<span>${m.text}</span>${readReceipt}</div>`;
 
                 row.innerHTML = `
                     ${!isMine ? `<img src="${senderPhoto}" class="chat-avatar">` : ''}
@@ -613,9 +521,7 @@ const backToProfile = document.getElementById("backToProfile");
 if(backToProfile) {
     backToProfile.onclick = () => {
         if (activeChatId && currentUser) set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
-        activeChatId = null;
-        limparListenersChat();
-        showScreen("profile-screen");
+        activeChatId = null; limparListenersChat(); showScreen("profile-screen");
     };
 }
 
@@ -626,7 +532,6 @@ async function sendMessage() {
         try {
             const dadosMsg = { sender: currentUser, text: texto, type: 'text', timestamp: Date.now(), read: false };
             if (respondendoMensagem) dadosMsg.replyTo = respondendoMensagem;
-            
             await push(ref(db, "chats/" + activeChatId), dadosMsg);
             campoTexto.value = "";
             if(iconeBotao) iconeBotao.innerText = "🎤";
@@ -642,7 +547,6 @@ async function handleAudio() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
-
             mediaRecorder = new MediaRecorder(stream, { mimeType });
             audioChunks = [];
 
@@ -651,27 +555,19 @@ async function handleAudio() {
                 const audioBlob = new Blob(audioChunks, { type: mimeType });
                 audioChunks = [];
                 if (!activeChatId || audioBlob.size < 100) return;
-
                 const reader = new FileReader();
                 reader.readAsDataURL(audioBlob);
                 reader.onloadend = async () => {
-                    try {
-                        await push(ref(db, `chats/${activeChatId}`), {
-                            sender: currentUser, text: reader.result, type: 'audio', timestamp: Date.now(), read: false
-                        });
-                    } catch (error) { console.error("Erro ao enviar áudio:", error); }
+                    try { await push(ref(db, `chats/${activeChatId}`), { sender: currentUser, text: reader.result, type: 'audio', timestamp: Date.now(), read: false }); } 
+                    catch (error) { console.error("Erro ao enviar áudio:", error); }
                 };
                 stream.getTracks().forEach(track => track.stop());
             };
-
-            mediaRecorder.start(); 
-            iconeBotao.innerText = "⏹️"; 
-            iconeBotao.style.color = "var(--danger)"; 
+            mediaRecorder.start(); iconeBotao.innerText = "⏹️"; iconeBotao.style.color = "var(--danger)"; 
         } catch (err) { alert("Permita o acesso ao microfone para gravar mensagens de áudio."); }
     } else {
         if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
-        iconeBotao.innerText = "🎤";
-        iconeBotao.style.color = ""; 
+        iconeBotao.innerText = "🎤"; iconeBotao.style.color = ""; 
     }
 }
 
@@ -681,19 +577,14 @@ if(campoTexto) {
         if (activeChatId && currentUser) {
             set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), true);
             clearTimeout(typingTimeout);
-            typingTimeout = setTimeout(() => {
-                if(activeChatId) set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
-            }, 2000);
+            typingTimeout = setTimeout(() => { if(activeChatId) set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false); }, 2000);
         }
     });
 }
 
 const actionBtn = document.getElementById("actionBtn");
 if(actionBtn) {
-    actionBtn.onclick = (e) => {
-        e.preventDefault(); 
-        iconeBotao && iconeBotao.innerText === "➤" ? sendMessage() : handleAudio();
-    };
+    actionBtn.onclick = (e) => { e.preventDefault(); iconeBotao && iconeBotao.innerText === "➤" ? sendMessage() : handleAudio(); };
 }
 
 const mediaInput = document.getElementById("mediaInput");
@@ -702,14 +593,11 @@ if(mediaInput) {
         const file = e.target.files[0];
         if (!file || !activeChatId) return;
         if (file.size > 5 * 1024 * 1024) alert("Atenção: Arquivo maior que 5MB pode falhar.");
-
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onloadend = async () => {
             try {
-                await push(ref(db, `chats/${activeChatId}`), {
-                    sender: currentUser, text: reader.result, type: file.type.startsWith('video') ? 'video' : 'image', timestamp: Date.now(), read: false 
-                });
+                await push(ref(db, `chats/${activeChatId}`), { sender: currentUser, text: reader.result, type: file.type.startsWith('video') ? 'video' : 'image', timestamp: Date.now(), read: false });
                 e.target.value = ''; 
             } catch (error) { alert("Erro ao enviar arquivo."); }
         };
@@ -721,21 +609,17 @@ if(stickerInput) {
     stickerInput.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file || !activeChatId) return;
-
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onloadend = async () => {
             try {
-                await push(ref(db, `chats/${activeChatId}`), {
-                    sender: currentUser, text: reader.result, type: 'sticker', timestamp: Date.now(), read: false 
-                });
+                await push(ref(db, `chats/${activeChatId}`), { sender: currentUser, text: reader.result, type: 'sticker', timestamp: Date.now(), read: false });
                 e.target.value = ''; 
             } catch (error) { alert("Erro ao criar figurinha."); }
         };
     };
 }
 
-// --- AMIGOS, DMs E GRUPOS ---
 const addFriendBtn = document.getElementById("addFriendBtn");
 if(addFriendBtn){
     addFriendBtn.onclick = async () => {
@@ -743,8 +627,7 @@ if(addFriendBtn){
         if (!f || f === currentUser) return;
         const check = await get(ref(db, "users/" + f));
         if (check.exists()) {
-            isGroup = false;
-            activeChatId = [currentUser, f].sort().join("_");
+            isGroup = false; activeChatId = [currentUser, f].sort().join("_");
             await remove(ref(db, `users/${currentUser}/hiddenDMs/${activeChatId}`));
             if(document.getElementById("deleteGroupBtn")) document.getElementById("deleteGroupBtn").style.display = "none";
             if(document.getElementById("addMemberBtn")) document.getElementById("addMemberBtn").style.display = "none";
@@ -767,45 +650,31 @@ function loadDMs() {
                 if (chatId.includes('_') && chatId.includes(currentUser)) {
                     const mensagens = chats[chatId];
                     let unreadCount = 0;
-
-                    Object.keys(mensagens).forEach(k => {
-                        if (k !== 'typing' && mensagens[k].sender !== currentUser && !mensagens[k].read) unreadCount++;
-                    });
+                    Object.keys(mensagens).forEach(k => { if (k !== 'typing' && mensagens[k].sender !== currentUser && !mensagens[k].read) unreadCount++; });
 
                     if (hiddenDMs[chatId] && unreadCount === 0) return;
-
                     const amigo = chatId.replace(currentUser, "").replace("_", "");
                     const div = document.createElement("div");
                     div.style.cssText = "display:flex; align-items:center; gap:5px; margin-bottom:8px;";
 
                     const btn = document.createElement("button");
-                    btn.className = "group-btn-list";
-                    btn.style.flex = "1";
+                    btn.className = "group-btn-list"; btn.style.flex = "1";
                     const badgeHtml = unreadCount > 0 ? `<span class="badge">${unreadCount > 10 ? '10+' : unreadCount}</span>` : "";
 
                     get(ref(db, `users/${amigo}`)).then(uSnap => {
                         const d = uSnap.val();
-                        btn.innerHTML = `
-                            <img src="${d?.photoUrl || DEFAULT_AVATAR}" style="width:28px; height:28px; border-radius:50%; object-fit:cover; vertical-align:middle;"> 
-                            <span style="flex:1; text-align:left;">${d?.displayName || amigo}</span>${badgeHtml}
-                        `;
+                        btn.innerHTML = `<img src="${d?.photoUrl || DEFAULT_AVATAR}" style="width:28px; height:28px; border-radius:50%; object-fit:cover; vertical-align:middle;"> <span style="flex:1; text-align:left;">${d?.displayName || amigo}</span>${badgeHtml}`;
                     });
 
                     btn.onclick = () => { isGroup = false; activeChatId = chatId; abrirChat(amigo); };
                     
                     const closeBtn = document.createElement("button");
-                    closeBtn.innerHTML = "✖"; 
-                    closeBtn.style.cssText = "background:var(--danger); padding:12px 15px; margin:0;";
+                    closeBtn.innerHTML = "✖"; closeBtn.style.cssText = "background:var(--danger); padding:12px 15px; margin:0;";
                     closeBtn.onclick = async (e) => {
                         e.stopPropagation();
-                        if (confirm("Deseja fechar esta conversa?")) {
-                            await set(ref(db, `users/${currentUser}/hiddenDMs/${chatId}`), true);
-                            loadDMs(); 
-                        }
+                        if (confirm("Deseja fechar esta conversa?")) { await set(ref(db, `users/${currentUser}/hiddenDMs/${chatId}`), true); loadDMs(); }
                     };
-                                        
-                    div.append(btn, closeBtn); 
-                    list.appendChild(div);
+                    div.append(btn, closeBtn); list.appendChild(div);
                 }
             });
         });
@@ -827,15 +696,11 @@ function loadGroups() {
                 const groupId = child.key;
                 const mensagensDoGrupo = todosOsChats[groupId] || {};
                 let unreadCount = 0;
-
-                Object.keys(mensagensDoGrupo).forEach(k => {
-                    if (k !== 'typing' && mensagensDoGrupo[k].sender !== currentUser && !mensagensDoGrupo[k].read) unreadCount++;
-                });
+                Object.keys(mensagensDoGrupo).forEach(k => { if (k !== 'typing' && mensagensDoGrupo[k].sender !== currentUser && !mensagensDoGrupo[k].read) unreadCount++; });
 
                 const badgeHtml = unreadCount > 0 ? `<span class="badge">${unreadCount > 10 ? '10+' : unreadCount}</span>` : "";
                 const btn = document.createElement("button");
                 btn.className = "group-btn-list";
-                
                 btn.innerHTML = `<img src="${g.photoUrl || DEFAULT_AVATAR}" style="width:28px; height:28px; border-radius:50%; object-fit:cover;"> <span style="flex:1;">${g.name}</span>${badgeHtml}`;
                 btn.onclick = () => { isGroup = true; activeChatId = groupId; abrirChat(g.name); };
                 list.appendChild(btn);
@@ -897,8 +762,7 @@ function abrirTelaGrupo() {
                 if(confirm("Apagar grupo para todos?")) {
                     await remove(ref(db, `groups/${activeChatId}`));
                     await remove(ref(db, `chats/${activeChatId}`));
-                    document.getElementById("group-info-screen").style.display = "none";
-                    showScreen("profile-screen");
+                    document.getElementById("group-info-screen").style.display = "none"; showScreen("profile-screen");
                 }
             };
         }
@@ -910,8 +774,7 @@ function abrirTelaGrupo() {
                     if (isOwner) {
                         const members = Object.keys(g.members || {}).filter(m => m !== currentUser);
                         if (members.length === 0) {
-                            await remove(ref(db, `groups/${activeChatId}`));
-                            await remove(ref(db, `chats/${activeChatId}`));
+                            await remove(ref(db, `groups/${activeChatId}`)); await remove(ref(db, `chats/${activeChatId}`));
                         } else {
                             const newAdmin = members.find(m => g.admins && g.admins[m]) || members[Math.floor(Math.random() * members.length)];
                             await update(ref(db, `groups/${activeChatId}`), { admin: newAdmin });
@@ -923,16 +786,13 @@ function abrirTelaGrupo() {
                         await remove(ref(db, `groups/${activeChatId}/members/${currentUser}`));
                         await remove(ref(db, `groups/${activeChatId}/admins/${currentUser}`));
                     }
-                    document.getElementById("group-info-screen").style.display = "none";
-                    showScreen("profile-screen");
+                    document.getElementById("group-info-screen").style.display = "none"; showScreen("profile-screen");
                 }
             };
         }
 
         if(document.getElementById("groupPhotoPreview")) {
-            document.getElementById("groupPhotoPreview").onclick = () => { 
-                if (isMembroAdmin) document.getElementById("groupPhotoInput")?.click(); 
-            };
+            document.getElementById("groupPhotoPreview").onclick = () => { if (isMembroAdmin) document.getElementById("groupPhotoInput")?.click(); };
         }
         
         if(document.getElementById("editGroupNameBtn")) {
@@ -963,11 +823,12 @@ function abrirTelaGrupo() {
                     <button onclick="window.removerDoGrupo('${membro}')" style="background:var(--danger); font-size:10px; padding:5px; margin-left:5px;">Expulsar</button>
                 ` : "";
 
+                // FIX 6: Removido "color: white" que atrapalhava no light mode, usando var(--text)
                 div.innerHTML = `
                     <img src="${userData.photoUrl || DEFAULT_AVATAR}" style="width:35px; height:35px; border-radius:50%; object-fit:cover; margin-right:10px;">
                     <div style="flex:1; display:flex; flex-direction:column; align-items:flex-start;"> 
                         <div style="display:flex; align-items:center;">
-                            <span style="font-weight:bold; color: white;">${membro}</span>
+                            <span style="font-weight:bold; color: var(--text);">${membro}</span>
                             ${ehAdmin ? '<span style="color:var(--success); font-size:11px; margin-left:5px;">(Admin)</span>' : ''}
                         </div>
                         <span style="color:${isOnline ? '#2ecc71' : '#aaa'}; font-size:11px; margin-top:2px;">${isOnline ? '● Online' : '○ Offline'}</span>
@@ -986,13 +847,11 @@ if(addNewGroupMemberBtn){
         if (!novo) return;
         if ((await get(ref(db, `users/${novo}`))).exists()) {
             await update(ref(db, `groups/${activeChatId}/members`), { [novo]: true });
-            document.getElementById("newGroupMemberInput").value = "";
-            alert("Usuário adicionado!");
+            document.getElementById("newGroupMemberInput").value = ""; alert("Usuário adicionado!");
         } else { alert("Usuário não existe!"); }
     };
 }
 
-// --- FAVORITOS (FIGURINHAS) ---
 const favoriteImageBtn = document.getElementById("favoriteImageBtn");
 if(favoriteImageBtn){
     favoriteImageBtn.onclick = async (e) => {
@@ -1001,8 +860,7 @@ if(favoriteImageBtn){
         if(!currentUser || !src) return;
         try {
             await push(ref(db, `users/${currentUser}/favorites`), src);
-            alert("Figurinha salva!");
-            document.getElementById("imageModal").style.display = 'none';
+            alert("Figurinha salva!"); document.getElementById("imageModal").style.display = 'none';
         } catch(err) { alert("Erro ao favoritar."); }
     };
 }
@@ -1023,38 +881,26 @@ if(openFavoritesBtn){
             if(!snap.exists()) return grid.innerHTML = "<p style='width: 100%; text-align: center;'>Nenhuma figurinha salva ainda.</p>";
             
             snap.forEach(child => {
-                const imgBase64 = child.val();
-                const key = child.key;
-                
-                const wrapper = document.createElement("div");
-                wrapper.style.position = "relative";
-                
-                const img = document.createElement("img");
-                img.src = imgBase64;
+                const imgBase64 = child.val(); const key = child.key;
+                const wrapper = document.createElement("div"); wrapper.style.position = "relative";
+                const img = document.createElement("img"); img.src = imgBase64;
                 img.style.cssText = "width: 80px; height: 80px; object-fit: contain; cursor: pointer; background: rgba(0,0,0,0.2); border-radius: 8px;";
                 img.onclick = () => window.sendFavoriteSticker(imgBase64);
                 
-                const delBtn = document.createElement("button");
-                delBtn.innerText = "🗑️";
+                const delBtn = document.createElement("button"); delBtn.innerText = "🗑️";
                 delBtn.style.cssText = "position: absolute; top: -5px; right: -5px; background: red; padding: 2px 5px; font-size: 10px; border-radius: 50%;";
                 delBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    remove(ref(db, `users/${currentUser}/favorites/${key}`));
-                    wrapper.remove();
+                    e.stopPropagation(); remove(ref(db, `users/${currentUser}/favorites/${key}`)); wrapper.remove();
                 };
-                
-                wrapper.append(img, delBtn);
-                grid.appendChild(wrapper);
+                wrapper.append(img, delBtn); grid.appendChild(wrapper);
             });
         });
     };
 }
 
-// --- TEMAS E CORES ---
 const alternarTema = () => localStorage.setItem("globalTheme", document.body.classList.toggle("light-mode") ? "light" : "dark");
 document.getElementById("themeToggleBtn")?.addEventListener("click", alternarTema);
 document.getElementById("mainThemeToggleBtn")?.addEventListener("click", alternarTema);
-
 if(localStorage.getItem("globalTheme") === "light") document.body.classList.add("light-mode");
 
 const colorPicker = document.getElementById("chatColorPicker");
@@ -1066,11 +912,10 @@ if (colorPicker) {
         }
     };
 }
-
 const wallpaperBtn = document.getElementById("wallpaperBtn");
 if (wallpaperBtn) wallpaperBtn.onclick = () => document.getElementById("wallpaperInput")?.click();
 
-// --- FUNÇÕES DE ADM: AVISOS E ERROS ---
+// FIX 5: AVISOS COM NICK ESPECIFICO
 const enviarAvisoBtn = document.getElementById("enviarAvisoBtn");
 if(enviarAvisoBtn) {
     enviarAvisoBtn.onclick = async () => {
@@ -1078,11 +923,11 @@ if(enviarAvisoBtn) {
         const texto = document.getElementById("avisoTexto").value.trim();
         const dataSpec = document.getElementById("avisoData").value;
         const horaInicio = document.getElementById("avisoHora").value || "00:00";
+        const nickDestino = document.getElementById("avisoNick").value.trim().toLowerCase();
         
         if(!texto || !dataSpec) return alert("Preencha tudo!");
-
         const novaRef = push(ref(db, `admin/avisos`)); 
-        await set(novaRef, { idAviso: novaRef.key, localDestino: local, texto, dataSpec, horaInicio, ativo: true });
+        await set(novaRef, { idAviso: novaRef.key, localDestino: local, texto, dataSpec, horaInicio, ativo: true, destinatario: nickDestino || "todos" });
         alert("Aviso agendado!");
     };
 }
@@ -1092,8 +937,7 @@ if(removerAvisoBtn) {
     removerAvisoBtn.onclick = async () => {
         const local = document.getElementById("avisoLocal").value;
         if(confirm(`Tirar os avisos da tela de ${local}?`)) {
-            await set(ref(db, `admin/avisos/${local}/ativo`), false);
-            alert("Aviso desativado!");
+            await set(ref(db, `admin/avisos/${local}/ativo`), false); alert("Aviso desativado!");
         }
     };
 }
@@ -1109,7 +953,9 @@ function escutarAvisos() {
         const localUser = currentUser ? "profile" : "login";
 
         const avisosPendentes = Object.values(dados).filter(aviso => 
-            aviso.ativo && aviso.localDestino === localUser && aviso.dataSpec === hoje && horaAtual >= aviso.horaInicio && !localStorage.getItem("aviso_fechado_" + aviso.idAviso)
+            aviso.ativo && aviso.localDestino === localUser && aviso.dataSpec === hoje && horaAtual >= aviso.horaInicio && 
+            !localStorage.getItem("aviso_fechado_" + aviso.idAviso) &&
+            (aviso.destinatario === "todos" || aviso.destinatario === currentUser)
         );
 
         const popUp = document.getElementById("globalPopUp");
@@ -1119,18 +965,14 @@ function escutarAvisos() {
             popUp.style.display = "flex";            
             window.fecharPopUpGlobal = () => {
                 localStorage.setItem("aviso_fechado_" + primeiroDaFila.idAviso, "true");
-                popUp.style.display = "none";
-                setTimeout(escutarAvisos, 300); 
+                popUp.style.display = "none"; setTimeout(escutarAvisos, 300); 
             };
         } else if (popUp) { popUp.style.display = "none"; }
     });
 }
 escutarAvisos();
 
-window.registrarErroAdmin = (acao, msgErro) => {
-    try { push(ref(db, `admin/erros`), { user: currentUser || "Deslogado", acao, msg: msgErro, time: Date.now() }); } catch(e){}
-};
-window.onerror = (message) => window.registrarErroAdmin("Erro de Sistema (Crash)", message);
+window.registrarErroAdmin = (acao, msgErro) => { try { push(ref(db, `admin/erros`), { user: currentUser || "Deslogado", acao, msg: msgErro, time: Date.now() }); } catch(e){} };
 
 function carregarErros() {
     onValue(ref(db, `admin/erros`), snap => {
@@ -1154,11 +996,9 @@ function carregarErros() {
                 </div>`;
             }
         });
-
         if(!temErroHoje) lista.innerHTML = "Nenhum erro registrado hoje. Tudo limpo! ✨";
         lista.scrollTop = lista.scrollHeight;
     });
 }
-
 const limparErrosBtn = document.getElementById("limparErrosBtn");
 if(limparErrosBtn) limparErrosBtn.onclick = async () => confirm("Apagar histórico de erros?") && await remove(ref(db, `admin/erros`));

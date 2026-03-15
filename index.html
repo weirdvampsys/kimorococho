@@ -9,6 +9,10 @@
 </head>
 <body>
 
+<div id="system-error-banner" style="display:none; position:fixed; top:0; left:0; width:100%; background:var(--danger); color:white; text-align:center; padding:10px; z-index:999999; font-weight:bold; box-sizing:border-box; font-size: 14px;">
+    Site fora do ar ou com erros. Por favor, entre em contato com o dono.
+</div>
+
 <div id="login-screen" class="screen active-flex">
   <div class="fundo-container">
     <img src="https://files.catbox.moe/dqagfa.png" class="fundo-ondas" alt="Ondas">
@@ -35,7 +39,7 @@
   </div>
 </div>
 
-<div id="profile-screen" class="screen">
+<div id="profile-screen" class="screen" style="overflow-y: auto;">
     <div class="profile-header">
       <img id="profilePhoto" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="foto-redonda">
       <h3 id="displayUsername" class="nome-exibicao">Nome</h3>
@@ -54,6 +58,7 @@
                 <option value="login">Tela de Login</option>
                 <option value="profile">Tela de Perfil (Logados)</option>
             </select>
+            <input type="text" id="avisoNick" placeholder="Nick específico (deixe em branco para enviar a todos)" style="width:100%; margin-bottom:5px; padding:8px; border-radius:5px; background: #40444b; color: white; border: none;">
             <textarea id="avisoTexto" placeholder="Digite o aviso aqui..." style="width:100%; height:60px; margin-bottom:5px; padding:8px; border-radius:5px; background:#40444b; color:white; border:none; resize: none;"></textarea>
             <div style="display:flex; gap:5px; margin-bottom:5px;">
                 <input type="time" id="avisoHora" style="flex:1; margin:0;" title="A partir de que horas o aviso aparece">
@@ -89,7 +94,7 @@
       </div>
     </div>
 
-    <div style="padding: 20px; flex: 1; overflow-y: auto;">
+    <div style="padding: 20px;">
       <h4>Conversas Privadas (DM)</h4>
       <div style="display: flex; gap: 5px; margin-bottom: 10px;">
           <input type="text" id="friendIdInput" placeholder="Login do amigo">
@@ -121,7 +126,7 @@
     </div>
     <div id="messages"></div>
     <div id="typingIndicator"></div>
-    <div id="reply-preview" style="display:none; padding: 10px; background: var(--bg-light); border-top: 1px solid #444; align-items: center; gap: 10px;"></div>
+    <div id="reply-preview" style="display:none; padding: 10px; background: var(--bg-light); border-top: 1px solid #444; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; overflow: hidden;"></div>
     
     <div class="chat-input-area">
         <div class="input-wrapper">
