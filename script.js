@@ -18,12 +18,13 @@ const firebaseConfig = {
 
 // 3. INICIALIZAÇÃO
 const app = initializeApp(firebaseConfig);
-
 const db = getDatabase(app);               
 const auth = getAuth(app);                 
 const storage = getStorage(app); 
-
 const messaging = getMessaging(app);
+
+// --- CONSTANTES GLOBAIS ---
+const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 
 // --- ESTADO GLOBAL ---
 let currentUser = null;
@@ -48,7 +49,21 @@ let respondendoMensagem = null;
 const campoTexto = document.getElementById("messageInput");
 const iconeBotao = document.getElementById("actionIcon");
 
-// --- FUNÇÕES GLOBAIS (Atreladas ao Window para onclicks do HTML dinâmico) ---
+// --- FUNÇÕES UTILITÁRIAS ---
+function limparListenersChat() {
+    if (chatUnsubscribe) { chatUnsubscribe(); chatUnsubscribe = null; }
+    if (statusUnsubscribe) { statusUnsubscribe(); statusUnsubscribe = null; }
+    if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
+}
+
+// Registro do Service Worker movido para o local correto (Javascript principal)
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/kimorococho/firebase-messaging-sw.js')
+        .then((reg) => console.log('Service Worker registrado!', reg))
+        .catch((err) => console.error('Falha ao registrar SW:', err));
+}
+
+// --- FUNÇÕES GLOBAIS (Atreladas ao Window) ---
 window.apagarMensagem = (key) => {
     if(confirm("Apagar mensagem?")) remove(ref(db, `chats/${activeChatId}/${key}`));
 };
@@ -136,26 +151,17 @@ function gerenciarPresenca() {
 
 async function iniciarNotificacoesGlobais() {
     try {
-        console.log("Pedindo permissão para notificações...");
         const permission = await Notification.requestPermission();
-        
         if (permission === 'granted') {
-            console.log("Permissão concedida! Gerando token do aparelho...");
-            // Pega o "endereço" deste celular específico
             const token = await getToken(messaging, { 
-                vapidKey: "d9ZGLvN4Md1NiSjS8aX6S59btllHpwwWQD_bWuANB80" // Vamos gerar isso no próximo passo!
+                vapidKey: "d9ZGLvN4Md1NiSjS8aX6S59btllHpwwWQD_bWuANB80"
             });
-            
             if (token && currentUser) {
-                // Salva o token do usuário no banco de dados
                 await update(ref(db, `users/${currentUser}`), { pushToken: token });
-                console.log("Token salvo com sucesso!");
             }
-        } else {
-            console.log("Usuário negou as notificações.");
         }
     } catch (error) {
-        console.error("Erro ao configurar notificações push:", error);
+        console.error("Erro ao configurar push:", error);
     }
 }
 
@@ -174,8 +180,7 @@ if(loginBtn) {
             gerenciarPresenca();
             iniciarNotificacoesGlobais();
         } catch (e) {
-            console.error(e);
-            alert("Erro ao entrar: Verifique se o e-mail/senha existem no painel do Firebase.");
+            window.registrarErroAdmin("Tentativa de Login", e.message);
         }
     };
 }
@@ -217,7 +222,10 @@ function loadProfile() {
         const d = snap.val();
         if (d) {
             document.getElementById("displayUsername").innerText = d.displayName || currentUser;
-            document.getElementById("profilePhoto").src = d.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+            document.getElementById("profilePhoto").src = d.photoUrl || DEFAULT_AVATAR;
+            if (currentUser === "weirdvampsys") {
+                document.getElementById("toggleAdminBtn").style.display = "inline-block";
+            }
         }
     });
     loadGroups();
@@ -248,6 +256,19 @@ if (btnChangePass) {
                 alert("Erro ao mudar senha: " + e.message);
             }
         }
+    };
+}
+
+// --- SISTEMA DE ADMINISTRAÇÃO ---
+const toggleAdminBtn = document.getElementById("toggleAdminBtn");
+if(toggleAdminBtn){
+    toggleAdminBtn.onclick = () => {
+        const section = document.getElementById("admin-section");
+        const isHidden = section.style.display === "none" || section.style.display === "";
+        section.style.display = isHidden ? "block" : "none";
+        toggleAdminBtn.innerText = isHidden ? "Fechar ADM" : "Sessão ADM";
+        toggleAdminBtn.style.background = isHidden ? "var(--danger)" : "var(--primary)";
+        if (isHidden) carregarErros();
     };
 }
 
@@ -337,16 +358,10 @@ const toggleEditBtn = document.getElementById("toggleEditBtn");
 if(toggleEditBtn){
     toggleEditBtn.onclick = () => {
         const section = document.getElementById("edit-section");
-        const btn = document.getElementById("toggleEditBtn");
-        if (section.style.display === "none" || section.style.display === "") {
-            section.style.display = "block";
-            btn.innerText = "Fechar Edição";
-            btn.style.background = "var(--danger)";
-        } else {
-            section.style.display = "none";
-            btn.innerText = "Editar Perfil";
-            btn.style.background = "#444";
-        }
+        const isHidden = section.style.display === "none" || section.style.display === "";
+        section.style.display = isHidden ? "block" : "none";
+        toggleEditBtn.innerText = isHidden ? "Fechar Edição" : "Editar Perfil";
+        toggleEditBtn.style.background = isHidden ? "var(--danger)" : "#444";
     };
 }
 
@@ -449,9 +464,7 @@ if (btnCancelCrop) {
 
 // --- CHAT E MENSAGENS ---
 function abrirChat(titulo) {
-    if (chatUnsubscribe) { chatUnsubscribe(); chatUnsubscribe = null; }
-    if (statusUnsubscribe) { statusUnsubscribe(); statusUnsubscribe = null; }
-    if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
+    limparListenersChat();
 
     const statusLabel = document.getElementById("chatStatus");
     const chatTitleElem = document.getElementById("chatWithTitle");
@@ -461,21 +474,14 @@ function abrirChat(titulo) {
     
     showScreen("chat-screen");
 
-    if (isGroup === false) {
-        const partes = activeChatId.split("_");
-        const amigo = partes.find(nome => nome !== currentUser);
-        
+    if (!isGroup) {
+        const amigo = activeChatId.split("_").find(nome => nome !== currentUser);
         if (amigo) {
             statusUnsubscribe = onValue(ref(db, `users/${amigo}/status`), (snap) => {
                 if(!statusLabel) return;
-                const status = snap.val();
-                if (status === "online") {
-                    statusLabel.innerText = "● Online";
-                    statusLabel.style.color = "#2ecc71";
-                } else {
-                    statusLabel.innerText = "○ Offline";
-                    statusLabel.style.color = "#aaa";
-                }
+                const isOnline = snap.val() === "online";
+                statusLabel.innerText = isOnline ? "● Online" : "○ Offline";
+                statusLabel.style.color = isOnline ? "#2ecc71" : "#aaa";
             });
         }
     } else {
@@ -487,12 +493,7 @@ function abrirChat(titulo) {
 
     get(ref(db, `users/${currentUser}/wallpapers/${activeChatId}`)).then(snap => {
         const msgContainer = document.getElementById("messages");
-        if(!msgContainer) return;
-        if(snap.exists()){
-            msgContainer.style.backgroundImage = `url(${snap.val()})`;
-        } else {
-            msgContainer.style.backgroundImage = "none";
-        }
+        if(msgContainer) msgContainer.style.backgroundImage = snap.exists() ? `url(${snap.val()})` : "none";
     });
 
     loadMessages();
@@ -502,9 +503,7 @@ function loadMessages() {
     get(ref(db, "users")).then(userSnap => {
         if (!activeChatId) return;
         
-        if (chatUnsubscribe) { chatUnsubscribe(); chatUnsubscribe = null; }
-        if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
-
+        limparListenersChat();
         const allUsers = userSnap.val() || {};
         
         chatUnsubscribe = onValue(ref(db, "chats/" + activeChatId), snap => {
@@ -519,13 +518,11 @@ function loadMessages() {
                 const msgKey = child.key;
                 const isMine = m.sender === currentUser;
                 const userData = allUsers[m.sender] || {};
-                const senderPhoto = userData.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+                const senderPhoto = userData.photoUrl || DEFAULT_AVATAR;
                 const displayName = userData.displayName || m.sender;
                 
-                if (!isMine && m.read === false) {
-                    setTimeout(() => { 
-                        update(ref(db, `chats/${activeChatId}/${msgKey}`), { read: true }); 
-                    }, 100);
+                if (!isMine && !m.read) {
+                    setTimeout(() => update(ref(db, `chats/${activeChatId}/${msgKey}`), { read: true }), 100);
                 }
 
                 const row = document.createElement("div");
@@ -534,34 +531,25 @@ function loadMessages() {
                 let timer;
                 row.onmousedown = row.ontouchstart = () => {
                     timer = setTimeout(() => {
-                        const resumo = m.type === 'text' ? m.text : `[${m.type}]`;
-                        window.prepararResposta(resumo, displayName);
+                        window.prepararResposta(m.type === 'text' ? m.text : `[${m.type}]`, displayName);
                         if (navigator.vibrate) navigator.vibrate(50);
                     }, 600); 
                 };
                 row.onmouseup = row.onmouseleave = row.ontouchend = () => clearTimeout(timer);
 
-                let readReceipt = "";
-                if (isMine) { 
-                    readReceipt = m.read 
-                        ? `<span style="color:#4dabf7; font-size:11px; margin-left:8px; text-shadow:1px 1px 1px black;">✓✓</span>` 
-                        : `<span style="color:#ccc; font-size:11px; margin-left:8px; text-shadow:1px 1px 1px black;">✓</span>`;
-                }
+                const readReceipt = isMine 
+                    ? `<span style="color:${m.read ? '#4dabf7' : '#ccc'}; font-size:11px; margin-left:8px; text-shadow:1px 1px 1px black;">${m.read ? '✓✓' : '✓'}</span>` 
+                    : "";
 
-                let deleteBtn = "";
-                if (isMine && (Date.now() - m.timestamp <= 60000)) {
-                    deleteBtn = `<span class="del-msg-btn" onclick="window.apagarMensagem('${msgKey}')" style="cursor:pointer; font-size:12px; margin-right:8px; opacity:0.5;">🗑️</span>`;
-                }
+                const deleteBtn = (isMine && (Date.now() - m.timestamp <= 60000)) 
+                    ? `<span class="del-msg-btn" onclick="window.apagarMensagem('${msgKey}')" style="cursor:pointer; font-size:12px; margin-right:8px; opacity:0.5;">🗑️</span>` 
+                    : "";
 
-                let replyHtml = "";
-                if (m.replyTo) {
-                    replyHtml = `
-                        <div style="background: rgba(0,0,0,0.2); border-left: 3px solid var(--primary); padding: 5px; margin-bottom: 5px; border-radius: 4px; font-size: 11px; text-align: left; cursor: pointer;">
-                            <b style="color: var(--primary);">${m.replyTo.autor}</b><br>
-                            <span style="opacity: 0.8; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${m.replyTo.texto}</span>
-                        </div>
-                    `;
-                }
+                const replyHtml = m.replyTo ? `
+                    <div style="background: rgba(0,0,0,0.2); border-left: 3px solid var(--primary); padding: 5px; margin-bottom: 5px; border-radius: 4px; font-size: 11px; text-align: left; cursor: pointer;">
+                        <b style="color: var(--primary);">${m.replyTo.autor}</b><br>
+                        <span style="opacity: 0.8; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${m.replyTo.texto}</span>
+                    </div>` : "";
 
                 let content = "";
                 if (m.type === 'image') {
@@ -573,19 +561,14 @@ function loadMessages() {
                 } else if (m.type === 'audio') {
                     content = `<div style="display:flex; flex-direction:column; align-items:flex-start;">${replyHtml}<div style="display:flex; align-items:flex-end;"><audio src="${m.text}" controls preload="metadata" style="max-width: 200px; height: 35px;"></audio>${readReceipt}</div></div>`;
                 } else {
-                    content = `<div class="msg-bubble" style="background:${isMine ? 'var(--primary)' : '#444'};">
-                                ${replyHtml}
-                                <span>${m.text}</span>${readReceipt}
-                            </div>`;
+                    content = `<div class="msg-bubble" style="background:${isMine ? 'var(--primary)' : '#444'};">${replyHtml}<span>${m.text}</span>${readReceipt}</div>`;
                 }
 
                 row.innerHTML = `
                     ${!isMine ? `<img src="${senderPhoto}" class="chat-avatar">` : ''}
                     <div class="msg-wrapper">
                         ${(isGroup && !isMine) ? `<span class="msg-name">${displayName}</span>` : ''}
-                        <div style="display:flex; align-items:center;">
-                            ${content}
-                        </div>
+                        <div style="display:flex; align-items:center;">${content}</div>
                     </div>
                     ${isMine ? `<img src="${senderPhoto}" class="chat-avatar">` : ''}
                     ${isMine ? deleteBtn : ''}
@@ -600,28 +583,19 @@ function loadMessages() {
             const tipando = Object.keys(data).filter(u => u !== currentUser && data[u]);
             const indicator = document.getElementById("typingIndicator");
             if(indicator){
-                if (tipando.length > 0) {
-                    indicator.innerText = `${tipando[0]} está digitando...`;
-                    indicator.style.display = "block";
-                } else { 
-                    indicator.style.display = "none"; 
-                }
+                indicator.innerText = tipando.length > 0 ? `${tipando[0]} está digitando...` : "";
+                indicator.style.display = tipando.length > 0 ? "block" : "none";
             }
         });
-
-    }).catch(err => console.error(err));
+    });
 }
 
 const backToProfile = document.getElementById("backToProfile");
 if(backToProfile) {
     backToProfile.onclick = () => {
-        if (activeChatId && currentUser) {
-            set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
-        }
+        if (activeChatId && currentUser) set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
         activeChatId = null;
-        if (chatUnsubscribe) { chatUnsubscribe(); chatUnsubscribe = null; }
-        if (statusUnsubscribe) { statusUnsubscribe(); statusUnsubscribe = null; }
-        if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
+        limparListenersChat();
         showScreen("profile-screen");
     };
 }
@@ -631,27 +605,15 @@ async function sendMessage() {
     const texto = campoTexto.value.trim();
     if (texto !== "" && activeChatId) {
         try {
-            const dadosMsg = {
-                sender: currentUser,
-                text: texto,
-                type: 'text',
-                timestamp: Date.now(),
-                read: false
-            };
-
-            if (respondendoMensagem) {
-                dadosMsg.replyTo = respondendoMensagem;
-            }
-
-            await push(ref(db, "chats/" + activeChatId), dadosMsg);
+            const dadosMsg = { sender: currentUser, text: texto, type: 'text', timestamp: Date.now(), read: false };
+            if (respondendoMensagem) dadosMsg.replyTo = respondendoMensagem;
             
+            await push(ref(db, "chats/" + activeChatId), dadosMsg);
             campoTexto.value = "";
             if(iconeBotao) iconeBotao.innerText = "🎤";
             set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), false);
             window.cancelarResposta(); 
-        } catch (e) {
-            console.error("Erro ao enviar:", e);
-        }
+        } catch (e) { console.error("Erro ao enviar:", e); }
     }
 }
 
@@ -665,48 +627,30 @@ async function handleAudio() {
             mediaRecorder = new MediaRecorder(stream, { mimeType });
             audioChunks = [];
 
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) audioChunks.push(event.data);
-            };
-
+            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
             mediaRecorder.onstop = async () => {
                 const audioBlob = new Blob(audioChunks, { type: mimeType });
                 audioChunks = [];
-
                 if (!activeChatId || audioBlob.size < 100) return;
 
                 const reader = new FileReader();
                 reader.readAsDataURL(audioBlob);
                 reader.onloadend = async () => {
-                    const base64Audio = reader.result;
-
                     try {
                         await push(ref(db, `chats/${activeChatId}`), {
-                            sender: currentUser,
-                            text: base64Audio, 
-                            type: 'audio',
-                            timestamp: Date.now(),
-                            read: false
+                            sender: currentUser, text: reader.result, type: 'audio', timestamp: Date.now(), read: false
                         });
-                    } catch (error) {
-                        console.error("Erro ao enviar áudio:", error);
-                    }
+                    } catch (error) { console.error("Erro ao enviar áudio:", error); }
                 };
-                
-                if (stream) stream.getTracks().forEach(track => track.stop());
+                stream.getTracks().forEach(track => track.stop());
             };
 
             mediaRecorder.start(); 
             iconeBotao.innerText = "⏹️"; 
             iconeBotao.style.color = "var(--danger)"; 
-        } catch (err) {
-            console.error("Erro de microfone:", err);
-            alert("Permita o acesso ao microfone para gravar mensagens de áudio.");
-        }
+        } catch (err) { alert("Permita o acesso ao microfone para gravar mensagens de áudio."); }
     } else {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-            mediaRecorder.stop();
-        }
+        if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
         iconeBotao.innerText = "🎤";
         iconeBotao.style.color = ""; 
     }
@@ -715,7 +659,6 @@ async function handleAudio() {
 if(campoTexto) {
     campoTexto.addEventListener("input", () => {
         if(iconeBotao) iconeBotao.innerText = campoTexto.value.trim() !== "" ? "➤" : "🎤";
-
         if (activeChatId && currentUser) {
             set(ref(db, `chats/${activeChatId}/typing/${currentUser}`), true);
             clearTimeout(typingTimeout);
@@ -730,8 +673,7 @@ const actionBtn = document.getElementById("actionBtn");
 if(actionBtn) {
     actionBtn.onclick = (e) => {
         e.preventDefault(); 
-        if (iconeBotao && iconeBotao.innerText === "➤") sendMessage();
-        else handleAudio();
+        iconeBotao && iconeBotao.innerText === "➤" ? sendMessage() : handleAudio();
     };
 }
 
@@ -740,30 +682,21 @@ if(mediaInput) {
     mediaInput.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file || !activeChatId) return;
-
-        if (file.size > 5 * 1024 * 1024) { 
-            alert("Atenção: Seu arquivo é maior que 5MB. Como não usamos o Firebase Storage, o envio pode falhar ou travar.");
-        }
+        if (file.size > 5 * 1024 * 1024) alert("Atenção: Arquivo maior que 5MB pode falhar.");
 
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onloadend = async () => {
-            const base64 = reader.result;
             try {
                 await push(ref(db, `chats/${activeChatId}`), {
-                    sender: currentUser,
-                    text: base64,
-                    type: (file.type && file.type.startsWith('video')) ? 'video' : 'image',
-                    timestamp: Date.now(),
-                    read: false 
+                    sender: currentUser, text: reader.result, type: file.type.startsWith('video') ? 'video' : 'image', timestamp: Date.now(), read: false 
                 });
                 e.target.value = ''; 
-            } catch (error) { 
-                alert("Erro ao enviar arquivo.");
-            }
+            } catch (error) { alert("Erro ao enviar arquivo."); }
         };
     };
 }
+
 const stickerInput = document.getElementById("stickerInput");
 if(stickerInput) {
     stickerInput.onchange = async (e) => {
@@ -773,19 +706,12 @@ if(stickerInput) {
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onloadend = async () => {
-            const base64 = reader.result;
             try {
                 await push(ref(db, `chats/${activeChatId}`), {
-                    sender: currentUser,
-                    text: base64,
-                    type: 'sticker',
-                    timestamp: Date.now(),
-                    read: false 
+                    sender: currentUser, text: reader.result, type: 'sticker', timestamp: Date.now(), read: false 
                 });
                 e.target.value = ''; 
-            } catch (error) { 
-                alert("Erro ao criar figurinha.");
-            }
+            } catch (error) { alert("Erro ao criar figurinha."); }
         };
     };
 }
@@ -800,13 +726,9 @@ if(addFriendBtn){
         if (check.exists()) {
             isGroup = false;
             activeChatId = [currentUser, f].sort().join("_");
-            
             await remove(ref(db, `users/${currentUser}/hiddenDMs/${activeChatId}`));
-            const delGrpBtn = document.getElementById("deleteGroupBtn");
-            const addMemBtn = document.getElementById("addMemberBtn");
-            if(delGrpBtn) delGrpBtn.style.display = "none";
-            if(addMemBtn) addMemBtn.style.display = "none";
-            
+            if(document.getElementById("deleteGroupBtn")) document.getElementById("deleteGroupBtn").style.display = "none";
+            if(document.getElementById("addMemberBtn")) document.getElementById("addMemberBtn").style.display = "none";
             abrirChat(f);
         } else { alert("Usuário não encontrado!"); }
     };
@@ -828,9 +750,7 @@ function loadDMs() {
                     let unreadCount = 0;
 
                     Object.keys(mensagens).forEach(k => {
-                        if (k !== 'typing' && mensagens[k].sender !== currentUser && mensagens[k].read === false) {
-                            unreadCount++;
-                        }
+                        if (k !== 'typing' && mensagens[k].sender !== currentUser && !mensagens[k].read) unreadCount++;
                     });
 
                     if (hiddenDMs[chatId] && unreadCount === 0) return;
@@ -842,26 +762,18 @@ function loadDMs() {
                     const btn = document.createElement("button");
                     btn.className = "group-btn-list";
                     btn.style.flex = "1";
-                    
-                    const badgeHtml = unreadCount > 0 
-                        ? `<span class="badge">${unreadCount > 10 ? '10+' : unreadCount}</span>` : "";
+                    const badgeHtml = unreadCount > 0 ? `<span class="badge">${unreadCount > 10 ? '10+' : unreadCount}</span>` : "";
 
                     get(ref(db, `users/${amigo}`)).then(uSnap => {
                         const d = uSnap.val();
-                        const foto = (d && d.photoUrl) ? d.photoUrl : "https://cdn-icons-png.flaticon.com/512/149/149071.png";
-                        const nomeExibicao = (d && d.displayName) ? d.displayName : amigo;
                         btn.innerHTML = `
-                            <img src="${foto}" style="width:28px; height:28px; border-radius:50%; object-fit:cover; vertical-align:middle;"> 
-                            <span style="flex:1; text-align:left;">${nomeExibicao}</span>
-                            ${badgeHtml}
+                            <img src="${d?.photoUrl || DEFAULT_AVATAR}" style="width:28px; height:28px; border-radius:50%; object-fit:cover; vertical-align:middle;"> 
+                            <span style="flex:1; text-align:left;">${d?.displayName || amigo}</span>${badgeHtml}
                         `;
                     });
 
-                    btn.onclick = () => { 
-                        isGroup = false; 
-                        activeChatId = chatId; 
-                        abrirChat(amigo); 
-                    };
+                    btn.onclick = () => { isGroup = false; activeChatId = chatId; abrirChat(amigo); };
+                    
                     const closeBtn = document.createElement("button");
                     closeBtn.innerHTML = "✖"; 
                     closeBtn.style.cssText = "background:var(--danger); padding:12px 15px; margin:0;";
@@ -873,8 +785,7 @@ function loadDMs() {
                         }
                     };
                                         
-                    div.appendChild(btn); 
-                    div.appendChild(closeBtn); 
+                    div.append(btn, closeBtn); 
                     list.appendChild(div);
                 }
             });
@@ -899,25 +810,15 @@ function loadGroups() {
                 let unreadCount = 0;
 
                 Object.keys(mensagensDoGrupo).forEach(k => {
-                    if (k !== 'typing' && mensagensDoGrupo[k].sender !== currentUser && mensagensDoGrupo[k].read === false) unreadCount++;
+                    if (k !== 'typing' && mensagensDoGrupo[k].sender !== currentUser && !mensagensDoGrupo[k].read) unreadCount++;
                 });
 
                 const badgeHtml = unreadCount > 0 ? `<span class="badge">${unreadCount > 10 ? '10+' : unreadCount}</span>` : "";
                 const btn = document.createElement("button");
                 btn.className = "group-btn-list";
-                const fotoGrupo = g.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
                 
-                btn.innerHTML = `
-                    <img src="${fotoGrupo}" style="width:28px; height:28px; border-radius:50%; object-fit:cover;"> 
-                    <span style="flex:1;">${g.name}</span>
-                    ${badgeHtml}
-                `;
-                
-                btn.onclick = () => { 
-                    isGroup = true; 
-                    activeChatId = groupId; 
-                    abrirChat(g.name); 
-                };
+                btn.innerHTML = `<img src="${g.photoUrl || DEFAULT_AVATAR}" style="width:28px; height:28px; border-radius:50%; object-fit:cover;"> <span style="flex:1;">${g.name}</span>${badgeHtml}`;
+                btn.onclick = () => { isGroup = true; activeChatId = groupId; abrirChat(g.name); };
                 list.appendChild(btn);
             });
         });
@@ -929,26 +830,20 @@ if(createGroupBtn){
     createGroupBtn.onclick = async () => {
         const nome = document.getElementById("groupNameInput").value.trim();
         if (!nome) return;
-        const gRef = push(ref(db, "groups"));
-        await set(gRef, { name: nome, admin: currentUser, members: { [currentUser]: true } });
+        await set(push(ref(db, "groups")), { name: nome, admin: currentUser, members: { [currentUser]: true } });
         document.getElementById("groupNameInput").value = "";
     };
 }
 
 const deleteGroupBtn = document.getElementById("deleteGroupBtn");
-if(deleteGroupBtn){
-    deleteGroupBtn.onclick = async () => {
-        abrirTelaGrupo();
-    };
-}
+if(deleteGroupBtn) deleteGroupBtn.onclick = abrirTelaGrupo;
 
 const addMemberBtn = document.getElementById("addMemberBtn");
 if(addMemberBtn){
     addMemberBtn.onclick = async () => {
         const novoMembro = prompt("Digite o login do usuário para adicionar:");
         if (!novoMembro) return;
-        const userSnap = await get(ref(db, `users/${novoMembro.toLowerCase()}`));
-        if (userSnap.exists()) {
+        if ((await get(ref(db, `users/${novoMembro.toLowerCase()}`))).exists()) {
             await update(ref(db, `groups/${activeChatId}/members`), { [novoMembro.toLowerCase()]: true });
             alert("Membro adicionado!");
         } else { alert("Usuário não encontrado."); }
@@ -956,16 +851,10 @@ if(addMemberBtn){
 }
 
 const areaClique = document.getElementById("headerClickArea");
-if (areaClique) {
-    areaClique.onclick = () => {
-        if (isGroup && activeChatId) abrirTelaGrupo();
-    };
-}
+if (areaClique) areaClique.onclick = () => { if (isGroup && activeChatId) abrirTelaGrupo(); };
 
 const closeGroupInfoBtn = document.getElementById("closeGroupInfoBtn");
-if(closeGroupInfoBtn){
-    closeGroupInfoBtn.onclick = () => document.getElementById("group-info-screen").style.display = "none";
-}
+if(closeGroupInfoBtn) closeGroupInfoBtn.onclick = () => document.getElementById("group-info-screen").style.display = "none";
 
 function abrirTelaGrupo() {
     document.getElementById("group-info-screen").style.display = "block";
@@ -973,28 +862,20 @@ function abrirTelaGrupo() {
         const g = snap.val();
         if (!g) return;
 
-        const groupNameElem = document.getElementById("groupInfoName");
-        const groupPhotoElem = document.getElementById("groupPhotoPreview");
-        
-        if(groupNameElem) groupNameElem.innerText = g.name;
-        if(groupPhotoElem) groupPhotoElem.src = g.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+        if(document.getElementById("groupInfoName")) document.getElementById("groupInfoName").innerText = g.name;
+        if(document.getElementById("groupPhotoPreview")) document.getElementById("groupPhotoPreview").src = g.photoUrl || DEFAULT_AVATAR;
 
-        const isOwner = (g.admin === currentUser);
+        const isOwner = g.admin === currentUser;
         const isMembroAdmin = isOwner || (g.admins && g.admins[currentUser]);
 
-        const editGrpNameBtn = document.getElementById("editGroupNameBtn");
-        const grpAddMemDiv = document.getElementById("groupAddMemberDiv");
+        if(document.getElementById("editGroupNameBtn")) document.getElementById("editGroupNameBtn").style.display = isMembroAdmin ? "block" : "none";
+        if(document.getElementById("groupAddMemberDiv")) document.getElementById("groupAddMemberDiv").style.display = isMembroAdmin ? "block" : "none";
         
-        if(editGrpNameBtn) editGrpNameBtn.style.display = isMembroAdmin ? "block" : "none";
-        if(grpAddMemDiv) grpAddMemDiv.style.display = isMembroAdmin ? "block" : "none";
-        
-        const deleteGroupBtnInfo = document.getElementById("deleteGroupBtnInfo");
-        const leaveGroupBtnInfo = document.getElementById("leaveGroupBtnInfo");
-        
-        if(deleteGroupBtnInfo) {
-            deleteGroupBtnInfo.style.display = isOwner ? "block" : "none";
-            deleteGroupBtnInfo.onclick = async () => {
-                if(confirm("Deseja realmente apagar este grupo para todos? Essa ação não pode ser desfeita.")) {
+        const delBtnInfo = document.getElementById("deleteGroupBtnInfo");
+        if(delBtnInfo) {
+            delBtnInfo.style.display = isOwner ? "block" : "none";
+            delBtnInfo.onclick = async () => {
+                if(confirm("Apagar grupo para todos?")) {
                     await remove(ref(db, `groups/${activeChatId}`));
                     await remove(ref(db, `chats/${activeChatId}`));
                     document.getElementById("group-info-screen").style.display = "none";
@@ -1003,8 +884,9 @@ function abrirTelaGrupo() {
             };
         }
         
-        if(leaveGroupBtnInfo) {
-            leaveGroupBtnInfo.onclick = async () => {
+        const leaveBtnInfo = document.getElementById("leaveGroupBtnInfo");
+        if(leaveBtnInfo) {
+            leaveBtnInfo.onclick = async () => {
                 if(confirm("Deseja sair deste grupo?")) {
                     if (isOwner) {
                         const members = Object.keys(g.members || {}).filter(m => m !== currentUser);
@@ -1012,8 +894,7 @@ function abrirTelaGrupo() {
                             await remove(ref(db, `groups/${activeChatId}`));
                             await remove(ref(db, `chats/${activeChatId}`));
                         } else {
-                            let newAdmin = members.find(m => g.admins && g.admins[m]);
-                            if (!newAdmin) newAdmin = members[Math.floor(Math.random() * members.length)];
+                            const newAdmin = members.find(m => g.admins && g.admins[m]) || members[Math.floor(Math.random() * members.length)];
                             await update(ref(db, `groups/${activeChatId}`), { admin: newAdmin });
                             await update(ref(db, `groups/${activeChatId}/admins`), { [newAdmin]: true });
                             await remove(ref(db, `groups/${activeChatId}/members/${currentUser}`));
@@ -1029,19 +910,18 @@ function abrirTelaGrupo() {
             };
         }
 
-        if(groupPhotoElem) {
-            groupPhotoElem.onclick = () => { 
+        if(document.getElementById("groupPhotoPreview")) {
+            document.getElementById("groupPhotoPreview").onclick = () => { 
                 if (isMembroAdmin) document.getElementById("groupPhotoInput")?.click(); 
             };
         }
         
-        if(editGrpNameBtn) {
-            editGrpNameBtn.onclick = async () => {
+        if(document.getElementById("editGroupNameBtn")) {
+            document.getElementById("editGroupNameBtn").onclick = async () => {
                 const novoNome = prompt("Novo nome do grupo:", g.name);
                 if (novoNome && novoNome.trim() !== "") {
                     await update(ref(db, `groups/${activeChatId}`), { name: novoNome });
-                    const chatTitle = document.getElementById("chatWithTitle");
-                    if(chatTitle) chatTitle.innerText = novoNome;
+                    if(document.getElementById("chatWithTitle")) document.getElementById("chatWithTitle").innerText = novoNome;
                 }
             };
         }
@@ -1049,52 +929,43 @@ function abrirTelaGrupo() {
         const membersList = document.getElementById("groupMembersList");
         if(membersList) {
             membersList.innerHTML = "";
-            const usersSnap = await get(ref(db, "users"));
-            const allUsers = usersSnap.val() || {};
+            const allUsers = (await get(ref(db, "users"))).val() || {};
 
             Object.keys(g.members || {}).forEach(membro => {
-                const ehAdmin = (g.admin === membro) || (g.admins && g.admins[membro]);
+                const ehAdmin = g.admin === membro || (g.admins && g.admins[membro]);
                 const userData = allUsers[membro] || {};
-                const foto = userData.photoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png";
-                const statusColor = userData.status === "online" ? "#2ecc71" : "#aaa";
-                const statusText = userData.status === "online" ? "● Online" : "○ Offline";
+                const isOnline = userData.status === "online";
                 
                 const div = document.createElement("div");
                 div.style.cssText = "display:flex; align-items:center; text-align:left; background:var(--bg-light); padding:10px; border-radius:8px;";
 
-                let botoesAdmin = "";
-                if (isMembroAdmin && membro !== currentUser) {
-                    botoesAdmin = `
-                        <button onclick="window.promoverRebaixar('${membro}', ${ehAdmin})" style="background:${ehAdmin ? 'var(--warning)' : 'var(--primary)'}; font-size:10px; padding:5px; margin-left:auto;">
-                            ${ehAdmin ? 'Remover Admin' : 'Dar Admin'}
-                        </button>
-                        <button onclick="window.removerDoGrupo('${membro}')" style="background:var(--danger); font-size:10px; padding:5px; margin-left:5px;">Expulsar</button>
-                    `;
-                }
+                let botoesAdmin = (isMembroAdmin && membro !== currentUser) ? `
+                    <button onclick="window.promoverRebaixar('${membro}', ${ehAdmin})" style="background:${ehAdmin ? 'var(--warning)' : 'var(--primary)'}; font-size:10px; padding:5px; margin-left:auto;">${ehAdmin ? 'Remover Admin' : 'Dar Admin'}</button>
+                    <button onclick="window.removerDoGrupo('${membro}')" style="background:var(--danger); font-size:10px; padding:5px; margin-left:5px;">Expulsar</button>
+                ` : "";
 
                 div.innerHTML = `
-                    <img src="${foto}" style="width:35px; height:35px; border-radius:50%; object-fit:cover; margin-right:10px;">
+                    <img src="${userData.photoUrl || DEFAULT_AVATAR}" style="width:35px; height:35px; border-radius:50%; object-fit:cover; margin-right:10px;">
                     <div style="flex:1; display:flex; flex-direction:column; align-items:flex-start;"> 
                         <div style="display:flex; align-items:center;">
                             <span style="font-weight:bold; color: white;">${membro}</span>
                             ${ehAdmin ? '<span style="color:var(--success); font-size:11px; margin-left:5px;">(Admin)</span>' : ''}
                         </div>
-                        <span style="color:${statusColor}; font-size:11px; margin-top:2px;">${statusText}</span>
-                    </div>
-                    ${botoesAdmin}
+                        <span style="color:${isOnline ? '#2ecc71' : '#aaa'}; font-size:11px; margin-top:2px;">${isOnline ? '● Online' : '○ Offline'}</span>
+                    </div>${botoesAdmin}
                 `;
                 membersList.appendChild(div);
             });
         }
     });
 }
+
 const addNewGroupMemberBtn = document.getElementById("addNewGroupMemberBtn");
 if(addNewGroupMemberBtn){
     addNewGroupMemberBtn.onclick = async () => {
         const novo = document.getElementById("newGroupMemberInput").value.trim().toLowerCase();
         if (!novo) return;
-        const userSnap = await get(ref(db, `users/${novo}`));
-        if (userSnap.exists()) {
+        if ((await get(ref(db, `users/${novo}`))).exists()) {
             await update(ref(db, `groups/${activeChatId}/members`), { [novo]: true });
             document.getElementById("newGroupMemberInput").value = "";
             alert("Usuário adicionado!");
@@ -1107,17 +978,13 @@ const favoriteImageBtn = document.getElementById("favoriteImageBtn");
 if(favoriteImageBtn){
     favoriteImageBtn.onclick = async (e) => {
         e.preventDefault();
-        const modalImg = document.getElementById("modalImg");
-        if(!modalImg) return;
-        const src = modalImg.src;
-        if(!currentUser) return;
+        const src = document.getElementById("modalImg")?.src;
+        if(!currentUser || !src) return;
         try {
             await push(ref(db, `users/${currentUser}/favorites`), src);
-            alert("Figurinha salva nos favoritos!");
+            alert("Figurinha salva!");
             document.getElementById("imageModal").style.display = 'none';
-        } catch(err) {
-            alert("Erro ao favoritar.");
-        }
+        } catch(err) { alert("Erro ao favoritar."); }
     };
 }
 
@@ -1134,10 +1001,8 @@ if(openFavoritesBtn){
         
         get(ref(db, `users/${currentUser}/favorites`)).then(snap => {
             grid.innerHTML = "";
-            if(!snap.exists()) {
-                grid.innerHTML = "<p style='width: 100%; text-align: center;'>Nenhuma figurinha salva ainda.</p>";
-                return;
-            }
+            if(!snap.exists()) return grid.innerHTML = "<p style='width: 100%; text-align: center;'>Nenhuma figurinha salva ainda.</p>";
+            
             snap.forEach(child => {
                 const imgBase64 = child.val();
                 const key = child.key;
@@ -1159,8 +1024,7 @@ if(openFavoritesBtn){
                     wrapper.remove();
                 };
                 
-                wrapper.appendChild(img);
-                wrapper.appendChild(delBtn);
+                wrapper.append(img, delBtn);
                 grid.appendChild(wrapper);
             });
         });
@@ -1168,29 +1032,114 @@ if(openFavoritesBtn){
 }
 
 // --- TEMAS E CORES ---
-const alternarTema = () => {
-    const isLight = document.body.classList.toggle("light-mode");
-    localStorage.setItem("globalTheme", isLight ? "light" : "dark");
-};
-
-const btnTemaChat = document.getElementById("themeToggleBtn");
-if (btnTemaChat) btnTemaChat.onclick = alternarTema;
-
-const btnTemaPrincipal = document.getElementById("mainThemeToggleBtn");
-if (btnTemaPrincipal) btnTemaPrincipal.onclick = alternarTema;
+const alternarTema = () => localStorage.setItem("globalTheme", document.body.classList.toggle("light-mode") ? "light" : "dark");
+document.getElementById("themeToggleBtn")?.addEventListener("click", alternarTema);
+document.getElementById("mainThemeToggleBtn")?.addEventListener("click", alternarTema);
 
 if(localStorage.getItem("globalTheme") === "light") document.body.classList.add("light-mode");
 
 const colorPicker = document.getElementById("chatColorPicker");
 if (colorPicker) {
     colorPicker.oninput = (e) => {
-        const cor = e.target.value;
         if (activeChatId) {
-            document.body.style.setProperty('--primary', cor);
-            localStorage.setItem('chatColor_' + activeChatId, cor);
+            document.body.style.setProperty('--primary', e.target.value);
+            localStorage.setItem('chatColor_' + activeChatId, e.target.value);
         }
     };
 }
 
 const wallpaperBtn = document.getElementById("wallpaperBtn");
 if (wallpaperBtn) wallpaperBtn.onclick = () => document.getElementById("wallpaperInput")?.click();
+
+// --- FUNÇÕES DE ADM: AVISOS E ERROS ---
+const enviarAvisoBtn = document.getElementById("enviarAvisoBtn");
+if(enviarAvisoBtn) {
+    enviarAvisoBtn.onclick = async () => {
+        const local = document.getElementById("avisoLocal").value;
+        const texto = document.getElementById("avisoTexto").value.trim();
+        const dataSpec = document.getElementById("avisoData").value;
+        const horaInicio = document.getElementById("avisoHora").value || "00:00";
+        
+        if(!texto || !dataSpec) return alert("Preencha tudo!");
+
+        const novaRef = push(ref(db, `admin/avisos`)); 
+        await set(novaRef, { idAviso: novaRef.key, localDestino: local, texto, dataSpec, horaInicio, ativo: true });
+        alert("Aviso agendado!");
+    };
+}
+
+const removerAvisoBtn = document.getElementById("removerAvisoBtn");
+if(removerAvisoBtn) {
+    removerAvisoBtn.onclick = async () => {
+        const local = document.getElementById("avisoLocal").value;
+        if(confirm(`Tirar os avisos da tela de ${local}?`)) {
+            await set(ref(db, `admin/avisos/${local}/ativo`), false);
+            alert("Aviso desativado!");
+        }
+    };
+}
+
+function escutarAvisos() {
+    onValue(ref(db, `admin/avisos`), snap => {
+        const dados = snap.val();
+        if(!dados) return;
+
+        const agora = new Date();
+        const hoje = agora.toISOString().split('T')[0];
+        const horaAtual = agora.getHours().toString().padStart(2, '0') + ":" + agora.getMinutes().toString().padStart(2, '0');
+        const localUser = currentUser ? "profile" : "login";
+
+        const avisosPendentes = Object.values(dados).filter(aviso => 
+            aviso.ativo && aviso.localDestino === localUser && aviso.dataSpec === hoje && horaAtual >= aviso.horaInicio && !localStorage.getItem("aviso_fechado_" + aviso.idAviso)
+        );
+
+        const popUp = document.getElementById("globalPopUp");
+        if (avisosPendentes.length > 0) {
+            const primeiroDaFila = avisosPendentes[0];
+            document.getElementById("globalPopUpText").innerText = primeiroDaFila.texto;
+            popUp.style.display = "flex";            
+            window.fecharPopUpGlobal = () => {
+                localStorage.setItem("aviso_fechado_" + primeiroDaFila.idAviso, "true");
+                popUp.style.display = "none";
+                setTimeout(escutarAvisos, 300); 
+            };
+        } else if (popUp) { popUp.style.display = "none"; }
+    });
+}
+escutarAvisos();
+
+window.registrarErroAdmin = (acao, msgErro) => {
+    try { push(ref(db, `admin/erros`), { user: currentUser || "Deslogado", acao, msg: msgErro, time: Date.now() }); } catch(e){}
+};
+window.onerror = (message) => window.registrarErroAdmin("Erro de Sistema (Crash)", message);
+
+function carregarErros() {
+    onValue(ref(db, `admin/erros`), snap => {
+        const lista = document.getElementById("listaErrosAdmin");
+        if(!lista) return;
+        lista.innerHTML = "";
+        
+        if(!snap.exists()) return lista.innerHTML = "Nenhum erro registrado hoje. Tudo limpo! ✨";
+
+        let temErroHoje = false;
+        const inicioDoDia = new Date().setHours(0,0,0,0);
+
+        snap.forEach(child => {
+            const err = child.val();
+            if(err.time >= inicioDoDia) {
+                temErroHoje = true;
+                lista.innerHTML += `<div style="margin-bottom: 5px; border-bottom: 1px solid #555; padding-bottom: 5px;">
+                    <span style="color:var(--danger)">[${new Date(err.time).toLocaleTimeString()}]</span> 
+                    <b>@${err.user}:</b> <span style="color: white;">${err.acao}</span><br>
+                    <span style="opacity: 0.8;">${err.msg}</span>
+                </div>`;
+            }
+        });
+
+        if(!temErroHoje) lista.innerHTML = "Nenhum erro registrado hoje. Tudo limpo! ✨";
+        lista.scrollTop = lista.scrollHeight;
+    });
+}
+
+const limparErrosBtn = document.getElementById("limparErrosBtn");
+if(limparErrosBtn) limparErrosBtn.onclick = async () => confirm("Apagar histórico de erros?") && await remove(ref(db, `admin/erros`));

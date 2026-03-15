@@ -16,18 +16,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
-// Procure onde você registra o service worker ou apenas adicione isso 
-// para ajudar o navegador a achar o arquivo no GitHub Pages
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/kimorococho/firebase-messaging-sw.js')
-    .then((registration) => {
-      console.log('Porteiro (Service Worker) registrado com sucesso!', registration);
-    })
-    .catch((err) => {
-      console.error('Falha ao registrar o porteiro:', err);
-    });
-}
-
 // Fica escutando as mensagens quando o site está fechado
 messaging.onBackgroundMessage((payload) => {
   console.log("Mensagem recebida com o app fechado: ", payload);
@@ -40,4 +28,3 @@ messaging.onBackgroundMessage((payload) => {
 
   self.registration.showNotification(notificationTitle, notificationOptions);
 });
-

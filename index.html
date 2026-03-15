@@ -13,7 +13,6 @@
   <div class="fundo-container">
     <img src="https://files.catbox.moe/dqagfa.png" class="fundo-ondas" alt="Ondas">
   </div>
-  
   <div class="janela-paint-wrap">
     <div class="janela-completa">
         <img class="barra-paint" src="https://files.catbox.moe/q963rh.png" alt="Barra Paint">
@@ -41,10 +40,38 @@
       <img id="profilePhoto" src="https://cdn-icons-png.flaticon.com/512/149/149071.png" class="foto-redonda">
       <h3 id="displayUsername" class="nome-exibicao">Nome</h3>
       <div class="botoes-topo">
-          <button id="toggleEditBtn">Editar Perfil</button>
-          <button id="mainThemeToggleBtn">🌓 Tema</button>
+        <button id="toggleEditBtn">Editar Perfil</button>
+        <button id="toggleAdminBtn" style="display:none; background: var(--primary);">Sessão ADM</button>
+        <button id="mainThemeToggleBtn">🌓 Tema</button>
       </div>
     </div>
+
+    <div id="admin-section" class="card-section" style="display:none; padding: 15px; border: 2px solid var(--primary); margin-top: 10px;">
+        <h4 style="margin-top:0; color:var(--primary); text-align: center;">👑 Painel de Administração</h4>
+        <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+            <h5>📢 Enviar Aviso (Pop-up)</h5>
+            <select id="avisoLocal" style="width:100%; margin-bottom:5px; padding:8px; border-radius:5px; background: #40444b; color: white; border: none;">
+                <option value="login">Tela de Login</option>
+                <option value="profile">Tela de Perfil (Logados)</option>
+            </select>
+            <textarea id="avisoTexto" placeholder="Digite o aviso aqui..." style="width:100%; height:60px; margin-bottom:5px; padding:8px; border-radius:5px; background:#40444b; color:white; border:none; resize: none;"></textarea>
+            <div style="display:flex; gap:5px; margin-bottom:5px;">
+                <input type="time" id="avisoHora" style="flex:1; margin:0;" title="A partir de que horas o aviso aparece">
+                <input type="date" id="avisoData" style="flex:1; margin:0;" title="Aparecer só neste dia">
+            </div>
+            <div style="display:flex; gap:5px; margin-top: 10px;">
+                <button id="enviarAvisoBtn" style="flex:1; background:var(--success); margin:0;">Publicar</button>
+                <button id="removerAvisoBtn" style="flex:1; background:var(--danger); margin:0;">Remover Avisos</button>
+            </div>
+        </div>
+        <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px;">
+            <h5 style="display: flex; justify-content: space-between; align-items: center; margin:0 0 10px 0;">
+                🐛 Log de Erros Recentes
+                <button id="limparErrosBtn" style="background:var(--danger); padding:5px 10px; font-size:10px; margin:0;">Limpar</button>
+            </h5>
+            <div id="listaErrosAdmin" style="max-height: 150px; overflow-y:auto; font-size:12px; color:#ffb86c; background: rgba(0,0,0,0.3); padding: 5px; border-radius: 5px;">Aguardando erros...</div>
+        </div>
+    </div> 
 
     <div id="edit-section" class="card-section" style="display:none; padding: 15px;">
       <div style="display: flex; gap: 5px; align-items: center; margin-bottom: 10px;">
@@ -85,30 +112,23 @@
         <h3 id="chatWithTitle" style="margin:0; font-size: 16px;">Chat</h3>
         <span id="chatStatus" style="font-size: 12px;"></span>
       </div>
-      
       <button id="themeToggleBtn" style="padding:5px; font-size: 14px; background: transparent;">🌓</button>
-      
       <input type="color" id="chatColorPicker" title="Mudar cor" style="width:25px; height:25px; padding:0; border:none; background:transparent; cursor:pointer;">
       <button id="wallpaperBtn" style="padding:5px; font-size: 14px; background: transparent;">🖼️</button>
       <input type="file" id="wallpaperInput" accept="image/*" style="display: none;">
-      
       <button id="addMemberBtn" style="display:none; font-size: 11px;">+ Membro</button>
       <button id="deleteGroupBtn" style="display:none; background: var(--danger); font-size: 11px;">Apagar</button>
     </div>
     <div id="messages"></div>
-    <div id="typingIndicator" style="display:none; padding:5px 15px; font-size:12px;"></div>
-    
+    <div id="typingIndicator"></div>
     <div id="reply-preview" style="display:none; padding: 10px; background: var(--bg-light); border-top: 1px solid #444; align-items: center; gap: 10px;"></div>
     
     <div class="chat-input-area">
         <div class="input-wrapper">
             <input type="text" id="messageInput" placeholder="Mensagem">
-            
             <button class="icon-btn" id="openFavoritesBtn" title="Figurinhas Favoritas">⭐</button>
-
             <input type="file" id="stickerInput" accept="image/*" style="display: none;">
             <button class="icon-btn" onclick="document.getElementById('stickerInput').click()" title="Nova Figurinha">🎴</button>
-
             <input type="file" id="mediaInput" accept="image/*,video/*" style="display: none;">
             <button class="icon-btn" onclick="document.getElementById('mediaInput').click()">📎</button>
         </div>
@@ -132,12 +152,10 @@
          <input type="text" id="newGroupMemberInput" placeholder="Login para adicionar">
          <button id="addNewGroupMemberBtn">Adicionar</button>
       </div>
-      
       <div id="groupActionsDiv" style="display:flex; gap:10px; margin-top:15px; width:100%;">
           <button id="leaveGroupBtnInfo" style="flex:1; background: var(--warning); color: black;">Sair do Grupo</button>
           <button id="deleteGroupBtnInfo" style="flex:1; background: var(--danger); display: none;">Apagar Grupo</button>
       </div>
-
       <hr style="width:100%; border-color:#444;">
       <h4 style="align-self:flex-start;">Membros</h4>
       <div id="groupMembersList" style="width:100%; display:flex; flex-direction:column; gap:10px;"></div>
@@ -158,8 +176,7 @@
             <h3 style="margin:0;">Figurinhas Salvas</h3>
             <button onclick="document.getElementById('favoritesModal').style.display='none'" style="background:var(--danger); padding:5px 10px; margin:0;">X</button>
         </div>
-        <div id="favoritesGrid" style="display:flex; flex-wrap:wrap; gap:10px; overflow-y:auto; flex:1; justify-content:center;">
-        </div>
+        <div id="favoritesGrid" style="display:flex; flex-wrap:wrap; gap:10px; overflow-y:auto; flex:1; justify-content:center;"></div>
     </div>
 </div>
   
@@ -177,5 +194,13 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
 <script type="module" src="script.js"></script>
+
+<div id="globalPopUp" class="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:99999; justify-content:center; align-items:center;">
+    <div style="background:var(--bg-light); padding:20px; border-radius:12px; width:80%; max-width:400px; position:relative; text-align:center; border: 2px solid var(--primary); filter: drop-shadow(0 0 10px var(--primary));">
+        <button onclick="window.fecharPopUpGlobal()" style="position:absolute; top:10px; right:10px; background:var(--danger); border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-weight: bold;">X</button>
+        <h3 style="margin-top:0; margin-bottom: 15px;">Aviso Importante 📢</h3>
+        <p id="globalPopUpText" style="margin-bottom:0; font-size: 14px; white-space: pre-wrap;"></p>
+    </div>
+</div>
 </body>
 </html>
