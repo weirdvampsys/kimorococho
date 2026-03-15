@@ -3,6 +3,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getDatabase, ref, get, set, update, push, onValue, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, signInWithEmailAndPassword, signOut, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { getStorage, ref as sRef, uploadBytes, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
 
 // 2. CONFIGURAÇÃO
 const firebaseConfig = {
@@ -17,9 +18,12 @@ const firebaseConfig = {
 
 // 3. INICIALIZAÇÃO
 const app = initializeApp(firebaseConfig);
+
 const db = getDatabase(app);               
 const auth = getAuth(app);                 
-const storage = getStorage(app);           
+const storage = getStorage(app); 
+
+const messaging = getMessaging(app);
 
 // --- ESTADO GLOBAL ---
 let currentUser = null;
@@ -130,46 +134,29 @@ function gerenciarPresenca() {
     });
 }
 
-function iniciarNotificacoesGlobais() {
-    if ("Notification" in window && Notification.permission === "default") {
-        setTimeout(() => {
-            if(confirm("Deseja ativar as notificações para saber quando mandarem mensagem fora do site?")) {
-                Notification.requestPermission();
-            }
-        }, 2000);
-    }
-
-    onValue(ref(db, "chats"), snap => {
-        if (!currentUser) return;
-        if (document.visibilityState !== "hidden") return;
-
-        snap.forEach(chatSnap => {
-            const chatId = chatSnap.key;
-            if (chatId.includes('_') && !chatId.includes(currentUser)) return;
-            if (chatId === activeChatId) return;
-            const msgs = chatSnap.val();
-            if (!msgs) return;
-            const keys = Object.keys(msgs).filter(k => k !== 'typing');
-            if (keys.length === 0) return;
+async function iniciarNotificacoesGlobais() {
+    try {
+        console.log("Pedindo permissão para notificações...");
+        const permission = await Notification.requestPermission();
+        
+        if (permission === 'granted') {
+            console.log("Permissão concedida! Gerando token do aparelho...");
+            // Pega o "endereço" deste celular específico
+            const token = await getToken(messaging, { 
+                vapidKey: "d9ZGLvN4Md1NiSjS8aX6S59btllHpwwWQD_bWuANB80" // Vamos gerar isso no próximo passo!
+            });
             
-            const lastKey = keys[keys.length - 1];
-            const lastMsg = msgs[lastKey];
-
-            if (lastMsg && lastMsg.sender !== currentUser) {
-                const notifKey = `notificado_${lastKey}`;
-                if (Date.now() - lastMsg.timestamp < 10000 && !localStorage.getItem(notifKey)) {
-                    localStorage.setItem(notifKey, "true");
-                    
-                    if (Notification.permission === "granted") {
-                        new Notification(`Nova mensagem de ${lastMsg.sender}`, { 
-                            body: lastMsg.text || 'Mídia recebida',
-                            icon: 'https://cdn-icons-png.flaticon.com/512/149/149071.png' 
-                        });
-                    }
-                }
+            if (token && currentUser) {
+                // Salva o token do usuário no banco de dados
+                await update(ref(db, `users/${currentUser}`), { pushToken: token });
+                console.log("Token salvo com sucesso!");
             }
-        });
-    });
+        } else {
+            console.log("Usuário negou as notificações.");
+        }
+    } catch (error) {
+        console.error("Erro ao configurar notificações push:", error);
+    }
 }
 
 // --- AUTENTICAÇÃO E SESSÃO ---
