@@ -1,7 +1,7 @@
 // 1. IMPORTS (Sempre no topo)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getDatabase, ref, get, set, update, push, onValue, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
-import { getAuth, signInWithEmailAndPassword, signOut, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, signOut, updatePassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { getStorage, ref as sRef, uploadBytes, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
 
@@ -56,12 +56,13 @@ function limparListenersChat() {
     if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
 }
 
-// Registro do Service Worker movido para o local correto (Javascript principal)
+// Registro do Service Worker corrigido
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/kimorococho/firebase-messaging-sw.js')
+    navigator.serviceWorker.register('./firebase-messaging-sw.js')
         .then((reg) => console.log('Service Worker registrado!', reg))
         .catch((err) => console.error('Falha ao registrar SW:', err));
 }
+
 
 // --- FUNÇÕES GLOBAIS (Atreladas ao Window) ---
 window.apagarMensagem = (key) => {
@@ -165,6 +166,24 @@ async function iniciarNotificacoesGlobais() {
     }
 }
 
+// --- VERIFICAÇÃO DE SESSÃO CONTÍNUA ---
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        // Pega o email do Firebase e tira o "@chat.com" pra voltar a ser só o login do usuário
+        currentUser = user.email.replace("@chat.com", "");
+        
+        // Esconde o login e mostra o perfil
+        showScreen("profile-screen");
+        loadProfile();
+        gerenciarPresenca();
+        iniciarNotificacoesGlobais();
+    } else {
+        // Se realmente não tem ninguém logado (ou se a pessoa clicou em Sair)
+        currentUser = null;
+        showScreen("login-screen");
+    }
+});
+
 // --- AUTENTICAÇÃO E SESSÃO ---
 const loginBtn = document.getElementById("loginBtn");
 if(loginBtn) {
@@ -173,14 +192,14 @@ if(loginBtn) {
         const p = document.getElementById("password").value.trim();
 
         try {
+            loginBtn.style.transform = "scale(0.95)"; // Dá um efeitinho de clique
+            // O Firebase faz o login, e o onAuthStateChanged (lá em cima) vai cuidar de trocar a tela!
             await signInWithEmailAndPassword(auth, u + "@chat.com", p);
-            currentUser = u; 
-            showScreen("profile-screen");
-            loadProfile();
-            gerenciarPresenca();
-            iniciarNotificacoesGlobais();
         } catch (e) {
+            alert("Erro ao logar: " + e.message); // Um alerta básico caso errem a senha
             window.registrarErroAdmin("Tentativa de Login", e.message);
+        } finally {
+            loginBtn.style.transform = "scale(1)";
         }
     };
 }
