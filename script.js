@@ -3,7 +3,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getDatabase, ref, get, set, update, push, onValue, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, signInWithEmailAndPassword, signOut, updatePassword, onAuthStateChanged, updateEmail } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { getStorage, ref as sRef, uploadBytes, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
-import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
+// Adicione o import do Messaging se não tiver
+import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
 
 // 2. CONFIGURAÇÃO
 const firebaseConfig = {
@@ -17,8 +18,8 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);               
-const auth = getAuth(app);                 
+const db = getDatabase(app);
+const auth = getAuth(app);        
 const storage = getStorage(app); 
 const messaging = getMessaging(app);
 
@@ -55,24 +56,28 @@ if ('serviceWorker' in navigator) {
         .catch((err) => console.error('Falha ao registrar SW:', err));
 }
 
-// FIX 7: AVISOS DE ERRO E SITE FORA DO AR GLOBAL
-window.addEventListener('error', () => { 
-    const banner = document.getElementById('system-error-banner');
-    if(banner) banner.style.display = 'block'; 
-});
-window.addEventListener('unhandledrejection', () => { 
-    const banner = document.getElementById('system-error-banner');
-    if(banner) banner.style.display = 'block'; 
-});
+// FIX 7: AVISOS DE ERRO E SITE FORA DO AR GLOBAL (CORRIGIDO)
 
 const connectedRef = ref(db, ".info/connected");
+let timeoutConexao; // Criamos uma variável para guardar o cronômetro
+
 onValue(connectedRef, (snap) => {
     const banner = document.getElementById('system-error-banner');
     if(!banner) return;
-    if (snap.val() === false) {
-        setTimeout(() => { if (!navigator.onLine || snap.val() === false) banner.style.display = 'block'; }, 2000);
-    } else {
+    
+    if (snap.val() === true) {
+        // Conectou! Limpa qualquer alarme de erro e esconde o banner
+        clearTimeout(timeoutConexao);
         banner.style.display = 'none';
+    } else {
+        // Está desconectado ou carregando. Limpa cronômetros antigos por garantia...
+        clearTimeout(timeoutConexao); 
+        
+        // ...e inicia um novo cronômetro de 3 segundos
+        timeoutConexao = setTimeout(() => { 
+            // Se passou 3 segundos e não recebeu o "true" lá de cima, exibe o erro
+            banner.style.display = 'block'; 
+        }, 3000); 
     }
 });
 
@@ -592,15 +597,34 @@ if(mediaInput) {
     mediaInput.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file || !activeChatId) return;
-        if (file.size > 5 * 1024 * 1024) alert("Atenção: Arquivo maior que 5MB pode falhar.");
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onloadend = async () => {
+        if (file.size > 5 * 1024 * 1024) alert("Atenção: Arquivo maior que 5MB pode demorar um pouco.");
+
+        const iconeOriginal = document.getElementById("actionIcon").innerText;
+        document.getElementById("actionIcon").innerText = "⏳"; // Mostra que tá carregando
+        
+        const urlExterna = await uploadParaCatbox(file);
+        
+        if (urlExterna) {
             try {
-                await push(ref(db, `chats/${activeChatId}`), { sender: currentUser, text: reader.result, type: file.type.startsWith('video') ? 'video' : 'image', timestamp: Date.now(), read: false });
-                e.target.value = ''; 
-            } catch (error) { alert("Erro ao enviar arquivo."); }
-        };
+                // Descobre se é vídeo ou imagem para o Firebase saber como renderizar
+                const tipoArquivo = file.type.startsWith('video') ? 'video' : 'image';
+                
+                await push(ref(db, `chats/${activeChatId}`), { 
+                    sender: currentUser, 
+                    text: urlExterna, // O link levinho do Catbox
+                    type: tipoArquivo, 
+                    timestamp: Date.now(), 
+                    read: false 
+                });
+            } catch (error) { 
+                alert("Erro ao salvar mensagem no banco."); 
+            }
+        } else {
+            alert("Erro ao fazer upload para o Catbox.");
+        }
+        
+        document.getElementById("actionIcon").innerText = iconeOriginal;
+        e.target.value = ''; 
     };
 }
 
@@ -609,16 +633,31 @@ if(stickerInput) {
     stickerInput.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file || !activeChatId) return;
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onloadend = async () => {
+        
+        const iconeOriginal = document.getElementById("actionIcon").innerText;
+        document.getElementById("actionIcon").innerText = "⏳";
+        
+        const urlExterna = await uploadParaCatbox(file);
+        
+        if (urlExterna) {
             try {
-                await push(ref(db, `chats/${activeChatId}`), { sender: currentUser, text: reader.result, type: 'sticker', timestamp: Date.now(), read: false });
-                e.target.value = ''; 
+                await push(ref(db, `chats/${activeChatId}`), { 
+                    sender: currentUser, 
+                    text: urlExterna, 
+                    type: 'sticker', 
+                    timestamp: Date.now(), 
+                    read: false 
+                });
             } catch (error) { alert("Erro ao criar figurinha."); }
-        };
+        } else {
+            alert("Erro ao hospedar a figurinha no Catbox.");
+        }
+        
+        document.getElementById("actionIcon").innerText = iconeOriginal;
+        e.target.value = ''; 
     };
 }
+
 
 const addFriendBtn = document.getElementById("addFriendBtn");
 if(addFriendBtn){
@@ -1002,3 +1041,27 @@ function carregarErros() {
 }
 const limparErrosBtn = document.getElementById("limparErrosBtn");
 if(limparErrosBtn) limparErrosBtn.onclick = async () => confirm("Apagar histórico de erros?") && await remove(ref(db, `admin/erros`));
+
+// Função para hospedar qualquer arquivo (imagem, vídeo, áudio) no Catbox
+async function uploadParaCatbox(file) {
+    const formData = new FormData();
+    formData.append("reqtype", "fileupload");
+    formData.append("fileToUpload", file);
+
+    try {
+        const response = await fetch("https://catbox.moe/user/api.php", {
+            method: "POST",
+            body: formData
+        });
+
+        if (response.ok) {
+            const url = await response.text(); // O Catbox devolve o link em texto puro!
+            return url.trim(); 
+        } else {
+            throw new Error("Falha ao enviar para o Catbox");
+        }
+    } catch (error) {
+        console.error("Erro no upload externo:", error);
+        return null;
+    }
+}
