@@ -8,14 +8,14 @@ import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.8.
 
 // 2. CONFIGURAÇÃO
 const firebaseConfig = {
-    apiKey: "AIzaSyDdKY_RF0804x0iMp40PjMyS31XuWKmO-8",
-    authDomain: "teste66666-fade0.firebaseapp.com",
-    projectId: "teste66666-fade0",
-    storageBucket: "teste66666-fade0.firebasestorage.app",
-    messagingSenderId: "117822974206",
-    appId: "1:117822974206:web:455be5577682e885ea9daf",
-    databaseURL: "https://teste66666-fade0-default-rtdb.firebaseio.com"
+  apiKey: "AIzaSyCJfo84IuIDzRDjgh1QE97kA2LDpwLmiTY",
+  authDomain: "kimorococho-4f979.firebaseapp.com",
+  projectId: "kimorococho-4f979",
+  storageBucket: "kimorococho-4f979.firebasestorage.app",
+  messagingSenderId: "810027921225",
+  appId: "1:810027921225:web:c8dee1c7337e70f43bf498"
 };
+
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
